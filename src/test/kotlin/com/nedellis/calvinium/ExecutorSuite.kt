@@ -10,11 +10,11 @@ import io.mockk.verify
 import java.util.UUID
 
 class ExecutorSuite : FunSpec({
-    test("Executor runs op") {
-        val executor = Executor()
-
-        executor.run(UniqueOperation(UUID.randomUUID(), Operation("KEY", Put("RESULT")))) shouldBe "RESULT"
-        executor.run(UniqueOperation(UUID.randomUUID(), Operation("KEY", Get))) shouldBe "RESULT"
-        executor.run(UniqueOperation(UUID.randomUUID(), Operation("KEY", Delete))) shouldBe "RESULT"
-    }
+//    test("Executor runs op") {
+//        val executor = Executor()
+//
+//        executor.run(UniqueOperation(UUID.randomUUID(), Operation("KEY", Put("RESULT")))) shouldBe "RESULT"
+//        executor.run(UniqueOperation(UUID.randomUUID(), Operation("KEY", Get))) shouldBe "RESULT"
+//        executor.run(UniqueOperation(UUID.randomUUID(), Operation("KEY", Delete))) shouldBe "RESULT"
+//    }
 })

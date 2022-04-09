@@ -7,13 +7,13 @@ private class LockManager() {
     //    private val leases: MutableMap<String, UUID> = mutableMapOf()
     private val leases = Striped.lazyWeakLock(NUM_STRIPES)
 
-    inline fun <T> withLock(key: String, body: () -> T): T {
-        val lock = leases.get(key)
-        lock.lock()
+    fun <T> withLocks(keys: List<String>, body: () -> T): T {
+        val sortedLocks = keys.sorted().map { leases.get(it) }
+        sortedLocks.forEach { it.lock() }
         try {
             return body()
         } finally {
-            lock.unlock()
+            sortedLocks.forEach { it.unlock() }
         }
     }
 
@@ -25,9 +25,10 @@ private class LockManager() {
 class Scheduler(val executor: Executor) {
     private val lm = LockManager()
 
-    fun run(uniqueOp: UniqueOperation): String {
-        lm.withLock(uniqueOp.op.key) {
-            return executor.run(uniqueOp)
+    fun run(uniqueTxn: UniqueTransaction): String? {
+        val keys = uniqueTxn.txn.operations.map { it.key }
+        return lm.withLocks(keys) {
+            executor.run(uniqueTxn)
         }
     }
 }

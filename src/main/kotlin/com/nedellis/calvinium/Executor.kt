@@ -19,26 +19,43 @@ class Executor {
 
     private val db = RocksDB.open(options, rocksDirectory.pathString)
 
-    fun run(uniqueOp: UniqueOperation): String {
-        return when (uniqueOp.op.type) {
-            is Put -> put(uniqueOp, uniqueOp.op.type.value)
-            Get -> get(uniqueOp)
-            Delete -> delete(uniqueOp)
+    fun run(uniqueTxn: UniqueTransaction): String? {
+        val recordCache =
+            uniqueTxn.txn.operations.map { it.key }.associateWith { db.get(it.encodeToByteArray())?.decodeToString() }
+                .toMutableMap()
+
+        for (op in uniqueTxn.txn.operations.dropLast(1)) {
+            runOperation(op, recordCache)
         }
+
+        val result = runOperation(uniqueTxn.txn.operations.last(), recordCache)
+
+        // Write back record cache
+        for (record in recordCache) {
+            if (record.value != null) {
+                db.put(record.key.encodeToByteArray(), record.value!!.encodeToByteArray())
+            } else {
+                db.delete(record.key.encodeToByteArray())
+            }
+        }
+
+        return result
     }
 
-    private fun put(uniqueOp: UniqueOperation, value: String): String {
-        db.put(uniqueOp.op.key.encodeToByteArray(), value.encodeToByteArray())
-        return value
-    }
-
-    private fun get(uniqueOp: UniqueOperation): String {
-        return db.get(uniqueOp.op.key.encodeToByteArray()).decodeToString()
-    }
-
-    private fun delete(uniqueOp: UniqueOperation): String {
-        val previousValue = db.get(uniqueOp.op.key.encodeToByteArray()).decodeToString()
-        db.delete(uniqueOp.op.key.encodeToByteArray())
-        return previousValue
+    private fun runOperation(op: Operation, recordCache: MutableMap<String, String?>): String? {
+        return when (op.type) {
+            is Put -> {
+                recordCache[op.key] = op.type.value
+                op.type.value
+            }
+            Get -> {
+                recordCache[op.key]
+            }
+            Delete -> {
+                val oldValue = recordCache[op.key]
+                recordCache[op.key] = null
+                oldValue
+            }
+        }
     }
 }
