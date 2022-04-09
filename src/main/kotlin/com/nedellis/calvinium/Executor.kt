@@ -10,7 +10,7 @@ class Executor {
         RocksDB.loadLibrary()
     }
 
-    private val rocksDirectory = Files.createTempDirectory("/tmp")
+    private val rocksDirectory = Files.createTempDirectory("calvinium")
     private val options = Options()
 
     init {
