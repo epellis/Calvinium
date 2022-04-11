@@ -1,5 +1,6 @@
 package com.nedellis.calvinium
 
+import org.rocksdb.ColumnFamilyHandle
 import org.rocksdb.Options
 import org.rocksdb.RocksDB
 import java.nio.file.Files
@@ -21,7 +22,7 @@ class Executor {
 
     fun run(uniqueTxn: UniqueTransaction): String? {
         val recordCache =
-            uniqueTxn.txn.operations.map { it.key }.associateWith { db.get(it.encodeToByteArray())?.decodeToString() }
+            uniqueTxn.txn.operations.map { it.key }.associateWith { db.get(it.toBytes())?.decodeToString() }
                 .toMutableMap()
 
         for (op in uniqueTxn.txn.operations.dropLast(1)) {
@@ -33,16 +34,16 @@ class Executor {
         // Write back record cache
         for (record in recordCache) {
             if (record.value != null) {
-                db.put(record.key.encodeToByteArray(), record.value!!.encodeToByteArray())
+                db.put(record.key.toBytes(), record.value!!.encodeToByteArray())
             } else {
-                db.delete(record.key.encodeToByteArray())
+                db.delete(record.key.toBytes())
             }
         }
 
         return result
     }
 
-    private fun runOperation(op: Operation, recordCache: MutableMap<String, String?>): String? {
+    private fun runOperation(op: Operation, recordCache: MutableMap<RecordKey, String?>): String? {
         return when (op.type) {
             is Put -> {
                 recordCache[op.key] = op.type.value

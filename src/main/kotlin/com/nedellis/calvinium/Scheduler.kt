@@ -7,7 +7,7 @@ private class LockManager() {
     //    private val leases: MutableMap<String, UUID> = mutableMapOf()
     private val leases = Striped.lazyWeakLock(NUM_STRIPES)
 
-    fun <T> withLocks(keys: List<String>, body: () -> T): T {
+    fun <T> withLocks(keys: List<RecordKey>, body: () -> T): T {
         val sortedLocks = keys.sorted().map { leases.get(it) }
         sortedLocks.forEach { it.lock() }
         try {

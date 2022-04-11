@@ -7,10 +7,12 @@ class IntegrationSuite : FunSpec({
     test("E2E Test") {
         val sequencer = Sequencer(Scheduler(Executor()))
 
-        sequencer.run(Transaction(listOf(Operation("A", Get)))) shouldBe null
-        sequencer.run(Transaction(listOf(Operation("A", Put("B"))))) shouldBe "B"
-        sequencer.run(Transaction(listOf(Operation("A", Get)))) shouldBe "B"
-        sequencer.run(Transaction(listOf(Operation("A", Delete)))) shouldBe "B"
-        sequencer.run(Transaction(listOf(Operation("A", Get)))) shouldBe null
+        val key = RecordKey(0, 0)
+
+        sequencer.run(Transaction(listOf(Operation(key, Get)))) shouldBe null
+        sequencer.run(Transaction(listOf(Operation(key, Put("B"))))) shouldBe "B"
+        sequencer.run(Transaction(listOf(Operation(key, Get)))) shouldBe "B"
+        sequencer.run(Transaction(listOf(Operation(key, Delete)))) shouldBe "B"
+        sequencer.run(Transaction(listOf(Operation(key, Get)))) shouldBe null
     }
 })
