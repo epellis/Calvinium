@@ -35,6 +35,12 @@ data class RecordKey(val tableId: Long, val keyId: Long) : Comparable<RecordKey>
     }
 }
 
+/**
+ * This is a data class so its obvious when the record value is part of a transaction but currently
+ * empty
+ */
+data class RecordValue(val contents: String? = null)
+
 sealed interface OperationType
 
 data class Put(val value: String) : OperationType

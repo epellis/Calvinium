@@ -24,7 +24,7 @@ private class LockManager() {
 class Scheduler(val executor: Executor) {
     private val lm = LockManager()
 
-    fun run(uniqueTxn: UniqueTransaction): String? {
+    fun run(uniqueTxn: UniqueTransaction): RecordValue {
         val keys = uniqueTxn.txn.operations.map { it.key }
         return lm.withLocks(keys) { executor.run(uniqueTxn) }
     }

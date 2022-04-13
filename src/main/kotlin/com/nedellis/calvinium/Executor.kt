@@ -11,12 +11,6 @@ import kotlin.io.path.pathString
 import org.rocksdb.Options
 import org.rocksdb.RocksDB
 
-/**
- * This is a data class so its obvious when the record value is part of a transaction but currently
- * empty
- */
-data class RecordValue(val contents: String? = null)
-
 interface ExecutorServer {
     fun setPartitionValue(txnUUID: UUID, recordKey: RecordKey, recordValue: RecordValue)
     fun isRecordLocal(recordKey: RecordKey): Boolean
@@ -90,7 +84,7 @@ class Executor(private val executorServer: ExecutorServer) {
 
     private val db = RocksDB.open(options, rocksDirectory.pathString)
 
-    fun run(uniqueTxn: UniqueTransaction): String? {
+    fun run(uniqueTxn: UniqueTransaction): RecordValue {
         val recordCache = buildRecordCache(uniqueTxn).toMutableMap()
 
         // Return the result of the last operation
@@ -101,7 +95,7 @@ class Executor(private val executorServer: ExecutorServer) {
 
         flushRecordCache(uniqueTxn.id, recordCache)
 
-        return result.contents
+        return result
     }
 
     private fun buildRecordCache(uniqueTxn: UniqueTransaction): Map<RecordKey, RecordValue> {
