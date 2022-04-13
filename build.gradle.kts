@@ -4,6 +4,7 @@ plugins {
     kotlin("jvm") version "1.6.20"
     application
     id("com.google.cloud.tools.jib") version "2.3.0"
+    id("com.ncorti.ktfmt.gradle") version "0.8.0"
 }
 
 group = "com.nedellis"
@@ -45,3 +46,5 @@ jib {
         image = "epelesis/calvinium"
     }
 }
+
+ktfmt { kotlinLangStyle() }

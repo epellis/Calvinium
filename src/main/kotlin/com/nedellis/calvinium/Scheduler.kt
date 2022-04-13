@@ -1,7 +1,6 @@
 package com.nedellis.calvinium
 
 import com.google.common.util.concurrent.Striped
-import java.util.UUID
 
 private class LockManager() {
     //    private val leases: MutableMap<String, UUID> = mutableMapOf()
@@ -27,8 +26,6 @@ class Scheduler(val executor: Executor) {
 
     fun run(uniqueTxn: UniqueTransaction): String? {
         val keys = uniqueTxn.txn.operations.map { it.key }
-        return lm.withLocks(keys) {
-            executor.run(uniqueTxn)
-        }
+        return lm.withLocks(keys) { executor.run(uniqueTxn) }
     }
 }

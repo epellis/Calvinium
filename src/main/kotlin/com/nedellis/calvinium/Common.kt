@@ -18,7 +18,8 @@ data class RecordKey(val tableId: Long, val keyId: Long) : Comparable<RecordKey>
 
     fun virtualNodeId(): Short {
         val digest =
-            MessageDigest.getInstance("MD5").digest(Longs.toByteArray(tableId).plus(Longs.toByteArray(keyId)))!!
+            MessageDigest.getInstance("MD5")
+                .digest(Longs.toByteArray(tableId).plus(Longs.toByteArray(keyId)))!!
         return Shorts.fromBytes(digest[0], digest[1])
     }
 
@@ -35,8 +36,11 @@ data class RecordKey(val tableId: Long, val keyId: Long) : Comparable<RecordKey>
 }
 
 sealed interface OperationType
+
 data class Put(val value: String) : OperationType
+
 object Get : OperationType
+
 object Delete : OperationType
 
 data class UniqueTransaction(val id: UUID, val txn: Transaction)
