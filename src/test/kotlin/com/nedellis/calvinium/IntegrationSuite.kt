@@ -41,5 +41,50 @@ class IntegrationSuite : FunSpec() {
             serviceManager.stopAsync()
             serviceManager.awaitStopped()
         }
+
+        test("E2E Test 1 replica, 2 partition").config(testCoroutineDispatcher = true) {
+            val localExecutors =
+                listOf(
+                    LocalExecutorServer(UUID.randomUUID()), LocalExecutorServer(UUID.randomUUID()))
+            for (ex in localExecutors) {
+                ex.setAllPartitions(localExecutors.associateBy { it.partitionUUID })
+            }
+            val sequencers = localExecutors.map { LocalSequencerService(Scheduler(Executor(it))) }
+
+            sequencers[0].setOtherSequencers(listOf(sequencers[1]))
+            sequencers[1].setOtherSequencers(listOf(sequencers[0]))
+
+            val serviceManager = ServiceManager(sequencers)
+            serviceManager.startAsync()
+            serviceManager.awaitHealthy()
+
+            val key = RecordKey(0, 0)
+
+            runBlocking {
+                sequencers[0].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
+                    RecordValue()
+                sequencers[1].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
+                    RecordValue()
+
+                sequencers[0].executeTxn(Transaction(listOf(Operation(key, Put("B"))))) shouldBe
+                    RecordValue("B")
+
+                sequencers[0].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
+                    RecordValue("B")
+                sequencers[1].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
+                    RecordValue("B")
+
+                sequencers[0].executeTxn(Transaction(listOf(Operation(key, Delete)))) shouldBe
+                    RecordValue("B")
+
+                sequencers[0].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
+                    RecordValue()
+                sequencers[1].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
+                    RecordValue()
+            }
+
+            serviceManager.stopAsync()
+            serviceManager.awaitStopped()
+        }
     }
 }

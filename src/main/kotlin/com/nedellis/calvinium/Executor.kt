@@ -1,57 +1,49 @@
 package com.nedellis.calvinium
 
-import dev.failsafe.Failsafe
-import dev.failsafe.RetryPolicy
-import dev.failsafe.function.CheckedRunnable
 import java.nio.file.Files
-import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.locks.ReentrantLock
 import kotlin.io.path.pathString
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.rocksdb.Options
 import org.rocksdb.RocksDB
 
 interface ExecutorServer {
-    fun setPartitionValue(txnUUID: UUID, recordKey: RecordKey, recordValue: RecordValue)
     fun isRecordLocal(recordKey: RecordKey): Boolean
-    fun getPartitionValue(txnUUID: UUID, recordKey: RecordKey): RecordValue
+    suspend fun setPartitionValue(txnUUID: UUID, recordKey: RecordKey, recordValue: RecordValue)
+    suspend fun getPartitionValue(txnUUID: UUID, recordKey: RecordKey): RecordValue
 }
 
 class LocalExecutorServer(val partitionUUID: UUID) : ExecutorServer {
     private lateinit var allPartitions: Map<UUID, LocalExecutorServer>
     private val valueCache = ConcurrentHashMap<Pair<UUID, RecordKey>, RecordValue>()
-    private val valueCacheLock = ReentrantLock()
 
-    override fun setPartitionValue(txnUUID: UUID, recordKey: RecordKey, recordValue: RecordValue) {
-        valueCache[Pair(txnUUID, recordKey)] = recordValue
+    private val valueCacheWaiters = mutableMapOf<Pair<UUID, RecordKey>, SendChannel<RecordValue>>()
+    private val valueCacheWaitersLock = Mutex()
+
+    override suspend fun setPartitionValue(
+        txnUUID: UUID,
+        recordKey: RecordKey,
+        recordValue: RecordValue
+    ) {
+        valueCacheWaitersLock.withLock {
+            valueCache[Pair(txnUUID, recordKey)] = recordValue
+            valueCacheWaiters.remove(Pair(txnUUID, recordKey))?.send(recordValue)
+        }
     }
 
     override fun isRecordLocal(recordKey: RecordKey): Boolean {
         return partitionForRecordKey(recordKey) == partitionUUID
     }
 
-    override fun getPartitionValue(txnUUID: UUID, recordKey: RecordKey): RecordValue {
+    override suspend fun getPartitionValue(txnUUID: UUID, recordKey: RecordKey): RecordValue {
         val responsiblePartition = partitionForRecordKey(recordKey)
-
-        val retryPolicy =
-            RetryPolicy.builder<Any>()
-                .handle(NoSuchElementException::class.java)
-                .withDelay(Duration.ofSeconds(1))
-                .withMaxRetries(10)
-                .build()
-
-        var partitionValue = RecordValue()
-
-        Failsafe.with(retryPolicy)
-            .run(
-                CheckedRunnable {
-                    partitionValue =
-                        allPartitions[responsiblePartition]!!.getPartitionValueRPC(
-                            txnUUID, recordKey)
-                })
-
-        return partitionValue
+        return allPartitions[responsiblePartition]!!.getPartitionValueRPC(txnUUID, recordKey)
     }
 
     fun setAllPartitions(partitions: Map<UUID, LocalExecutorServer>) {
@@ -64,10 +56,19 @@ class LocalExecutorServer(val partitionUUID: UUID) : ExecutorServer {
         return allPartitions.keys.sorted()[partitionIdx]
     }
 
-    /** @throws NoSuchElementException if the value does not yet exist in the map */
-    @Synchronized
-    private fun getPartitionValueRPC(uuid: UUID, recordKey: RecordKey): RecordValue {
-        return valueCache.getValue(Pair(uuid, recordKey))
+    private suspend fun getPartitionValueRPC(txnUUID: UUID, recordKey: RecordKey): RecordValue {
+        val responseChannel = Channel<RecordValue>(Channel.BUFFERED)
+
+        valueCacheWaitersLock.withLock {
+            val cachedRecordValue = valueCache[Pair(txnUUID, recordKey)]
+            if (cachedRecordValue != null) {
+                responseChannel.send(cachedRecordValue)
+            } else {
+                valueCacheWaiters[Pair(txnUUID, recordKey)] = responseChannel
+            }
+        }
+
+        return responseChannel.receive()
     }
 }
 
@@ -85,7 +86,7 @@ class Executor(private val executorServer: ExecutorServer) {
 
     private val db = RocksDB.open(options, rocksDirectory.pathString)
 
-    fun run(uniqueTxn: UniqueTransaction): RecordValue {
+    suspend fun run(uniqueTxn: UniqueTransaction): RecordValue {
         val recordCache = buildRecordCache(uniqueTxn).toMutableMap()
 
         // Return the result of the last operation
@@ -99,7 +100,7 @@ class Executor(private val executorServer: ExecutorServer) {
         return result
     }
 
-    private fun buildRecordCache(uniqueTxn: UniqueTransaction): Map<RecordKey, RecordValue> {
+    private suspend fun buildRecordCache(uniqueTxn: UniqueTransaction): Map<RecordKey, RecordValue> {
         val recordCache =
             uniqueTxn
                 .txn

@@ -8,7 +8,7 @@ import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 private data class QueuedTxn(
     val uniqueTransaction: UniqueTransaction,
@@ -22,7 +22,7 @@ class LocalSequencerService(private val scheduler: Scheduler) : AbstractExecutio
     override fun run() {
         runBlocking {
             while (isRunning) {
-                withTimeout(1000L) {
+                withTimeoutOrNull(1000L) {
                     val txn = workChannel.receive()
                     val result = scheduler.run(txn.uniqueTransaction)
                     if (txn.responseChannel != null) {
@@ -49,7 +49,6 @@ class LocalSequencerService(private val scheduler: Scheduler) : AbstractExecutio
             for (seq in otherSequencers) {
                 launch { seq.executeTxnRPC(uniqueTxn) }
             }
-
             launch { workChannel.send(QueuedTxn(uniqueTxn, resultsChannel)) }
         }
 

@@ -18,7 +18,6 @@ val KOTEST_VERSION = "5.2.3"
 dependencies {
     implementation("com.google.guava:guava:31.1-jre")
     implementation("org.rocksdb:rocksdbjni:7.0.4")
-    implementation("dev.failsafe:failsafe:3.2.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.1")
 
     testImplementation(kotlin("test"))
