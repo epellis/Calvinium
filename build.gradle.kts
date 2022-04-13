@@ -3,7 +3,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 plugins {
     kotlin("jvm") version "1.6.20"
     application
-    antlr
+    id("com.google.cloud.tools.jib") version "2.3.0"
 }
 
 group = "com.nedellis"
@@ -37,7 +37,11 @@ application {
     mainClass.set("MainKt")
 }
 
-tasks.generateGrammarSource {
-    maxHeapSize = "64m"
-    arguments = arguments + listOf("-visitor", "-long-messages")
+jib {
+    from {
+        image = "eclipse-temurin:17-jre-alpine"
+    }
+    to {
+        image = "epelesis/calvinium"
+    }
 }
