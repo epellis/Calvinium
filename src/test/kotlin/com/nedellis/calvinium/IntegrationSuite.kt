@@ -44,8 +44,7 @@ class IntegrationSuite : FunSpec() {
 
         test("E2E Test 1 replica, 2 partition").config(testCoroutineDispatcher = true) {
             val localExecutors =
-                listOf(
-                    LocalExecutorServer(UUID.randomUUID()), LocalExecutorServer(UUID.randomUUID()))
+                listOf(LocalExecutorServer(UUID(0, 0)), LocalExecutorServer(UUID(0, 1)))
             for (ex in localExecutors) {
                 ex.setAllPartitions(localExecutors.associateBy { it.partitionUUID })
             }

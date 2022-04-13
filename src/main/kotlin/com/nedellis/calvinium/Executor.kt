@@ -6,8 +6,6 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.pathString
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.rocksdb.Options
@@ -100,22 +98,16 @@ class Executor(private val executorServer: ExecutorServer) {
         return result
     }
 
-    private suspend fun buildRecordCache(uniqueTxn: UniqueTransaction): Map<RecordKey, RecordValue> {
-        val recordCache =
-            uniqueTxn
-                .txn
-                .operations
-                .map { it.key }
-                .associateWith { RecordValue(db.get(it.toBytes())?.decodeToString()) }
-                .toMutableMap()
-
+    private suspend fun buildRecordCache(
+        uniqueTxn: UniqueTransaction
+    ): Map<RecordKey, RecordValue> {
         val localRecordKeys =
             uniqueTxn.txn.operations.map { it.key }.filter { executorServer.isRecordLocal(it) }
         val localRecordCache =
-            localRecordKeys.associateWith { db.get(it.toBytes())?.decodeToString() }
+            localRecordKeys.associateWith { RecordValue(db.get(it.toBytes())?.decodeToString()) }
 
-        for (record in recordCache) {
-            executorServer.setPartitionValue(uniqueTxn.id, record.key, record.value)
+        for (localRecord in localRecordCache) {
+            executorServer.setPartitionValue(uniqueTxn.id, localRecord.key, localRecord.value)
         }
 
         val externalRecordKeys =
@@ -123,15 +115,17 @@ class Executor(private val executorServer: ExecutorServer) {
         val externalRecordCache =
             externalRecordKeys.associateWith { executorServer.getPartitionValue(uniqueTxn.id, it) }
 
-        return recordCache
+        return localRecordCache.plus(externalRecordCache)
     }
 
     private fun flushRecordCache(txnUUID: UUID, recordCache: Map<RecordKey, RecordValue>) {
         for (record in recordCache) {
-            if (record.value.contents != null) {
-                db.put(record.key.toBytes(), record.value.contents!!.encodeToByteArray())
-            } else {
-                db.delete(record.key.toBytes())
+            if (executorServer.isRecordLocal(record.key)) {
+                if (record.value.contents != null) {
+                    db.put(record.key.toBytes(), record.value.contents!!.encodeToByteArray())
+                } else {
+                    db.delete(record.key.toBytes())
+                }
             }
         }
     }
