@@ -1,13 +1,14 @@
 package com.nedellis.calvinium
 
 import com.google.common.util.concurrent.ServiceManager
+import io.kotest.common.runBlocking
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import java.util.UUID
 
-class IntegrationSuite :
-    FunSpec({
-        test("E2E Test 1 replica, 1 partition") {
+class IntegrationSuite : FunSpec() {
+    init {
+        test("E2E Test 1 replica, 1 partition").config(testCoroutineDispatcher = true) {
             val localExecutors = listOf(LocalExecutorServer(UUID.randomUUID()))
             for (ex in localExecutors) {
                 ex.setAllPartitions(localExecutors.associateBy { it.partitionUUID })
@@ -24,18 +25,21 @@ class IntegrationSuite :
 
             val key = RecordKey(0, 0)
 
-            sequencers[0].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
-                RecordValue()
-            sequencers[0].executeTxn(Transaction(listOf(Operation(key, Put("B"))))) shouldBe
-                RecordValue("B")
-            sequencers[0].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
-                RecordValue("B")
-            sequencers[0].executeTxn(Transaction(listOf(Operation(key, Delete)))) shouldBe
-                RecordValue("B")
-            sequencers[0].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
-                RecordValue()
+            runBlocking {
+                sequencers[0].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
+                    RecordValue()
+                sequencers[0].executeTxn(Transaction(listOf(Operation(key, Put("B"))))) shouldBe
+                    RecordValue("B")
+                sequencers[0].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
+                    RecordValue("B")
+                sequencers[0].executeTxn(Transaction(listOf(Operation(key, Delete)))) shouldBe
+                    RecordValue("B")
+                sequencers[0].executeTxn(Transaction(listOf(Operation(key, Get)))) shouldBe
+                    RecordValue()
+            }
 
             serviceManager.stopAsync()
             serviceManager.awaitStopped()
         }
-    })
+    }
+}

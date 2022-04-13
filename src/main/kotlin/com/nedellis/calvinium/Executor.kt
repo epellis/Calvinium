@@ -7,6 +7,7 @@ import java.nio.file.Files
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.locks.ReentrantLock
 import kotlin.io.path.pathString
 import org.rocksdb.Options
 import org.rocksdb.RocksDB
@@ -20,8 +21,8 @@ interface ExecutorServer {
 class LocalExecutorServer(val partitionUUID: UUID) : ExecutorServer {
     private lateinit var allPartitions: Map<UUID, LocalExecutorServer>
     private val valueCache = ConcurrentHashMap<Pair<UUID, RecordKey>, RecordValue>()
+    private val valueCacheLock = ReentrantLock()
 
-    @Synchronized
     override fun setPartitionValue(txnUUID: UUID, recordKey: RecordKey, recordValue: RecordValue) {
         valueCache[Pair(txnUUID, recordKey)] = recordValue
     }

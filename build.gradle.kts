@@ -13,17 +13,19 @@ version = "1.0-SNAPSHOT"
 
 repositories { mavenCentral() }
 
-val KOTEST_VERSION = "5.2.2"
+val KOTEST_VERSION = "5.2.3"
 
 dependencies {
     implementation("com.google.guava:guava:31.1-jre")
     implementation("org.rocksdb:rocksdbjni:7.0.4")
     implementation("dev.failsafe:failsafe:3.2.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.1")
 
     testImplementation(kotlin("test"))
     testImplementation("io.kotest:kotest-runner-junit5:$KOTEST_VERSION")
     testImplementation("io.kotest:kotest-assertions-core:$KOTEST_VERSION")
     testImplementation("io.mockk:mockk:1.12.3")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.6.1")
 }
 
 tasks.test { useJUnitPlatform() }

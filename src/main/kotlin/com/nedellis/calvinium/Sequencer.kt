@@ -2,26 +2,32 @@ package com.nedellis.calvinium
 
 import com.google.common.util.concurrent.AbstractExecutionThreadService
 import java.util.UUID
-import java.util.concurrent.SynchronousQueue
-import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 private data class QueuedTxn(
     val uniqueTransaction: UniqueTransaction,
-    val shouldReturnResults: Boolean
+    val responseChannel: SendChannel<RecordValue>? = null
 )
 
 class LocalSequencerService(private val scheduler: Scheduler) : AbstractExecutionThreadService() {
-    private val workQueue = SynchronousQueue<QueuedTxn>()
-    private val resultsQueue = SynchronousQueue<RecordValue>()
+    private val workChannel = Channel<QueuedTxn>()
     private lateinit var otherSequencers: List<LocalSequencerService>
 
     override fun run() {
-        while (isRunning) {
-            val txn = workQueue.poll(1, TimeUnit.SECONDS)
-            if (txn != null) {
-                val result = scheduler.run(txn.uniqueTransaction)
-                if (txn.shouldReturnResults) {
-                    resultsQueue.put(result)
+        runBlocking {
+            while (isRunning) {
+                withTimeout(1000L) {
+                    val txn = workChannel.receive()
+                    val result = scheduler.run(txn.uniqueTransaction)
+                    if (txn.responseChannel != null) {
+                        txn.responseChannel.send(result)
+                    }
                 }
             }
         }
@@ -31,16 +37,22 @@ class LocalSequencerService(private val scheduler: Scheduler) : AbstractExecutio
         otherSequencers = sequencers
     }
 
-    private fun executeTxnRPC(txn: UniqueTransaction) {
-        workQueue.put(QueuedTxn(txn, false))
+    private suspend fun executeTxnRPC(txn: UniqueTransaction) {
+        workChannel.send(QueuedTxn(txn))
     }
 
-    fun executeTxn(txn: Transaction): RecordValue {
+    suspend fun executeTxn(txn: Transaction): RecordValue {
         val uniqueTxn = UniqueTransaction(UUID.randomUUID(), txn)
-        for (seq in otherSequencers) {
-            seq.executeTxnRPC(uniqueTxn)
+        val resultsChannel = Channel<RecordValue>()
+
+        withContext(Dispatchers.Default) {
+            for (seq in otherSequencers) {
+                launch { seq.executeTxnRPC(uniqueTxn) }
+            }
+
+            launch { workChannel.send(QueuedTxn(uniqueTxn, resultsChannel)) }
         }
-        workQueue.put(QueuedTxn(uniqueTxn, true))
-        return resultsQueue.take()
+
+        return resultsChannel.receive()
     }
 }
