@@ -9,6 +9,7 @@ import kotlin.io.path.pathString
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -51,14 +52,14 @@ class LocalExecutorServer(val partitionUUID: UUID) : ExecutorServer {
     }
 
     override fun allOtherPartitions(): Set<UUID> {
-        return allPartitions.keys.filter { it != partitionUUID }.toSet()
+        return allPartitions.keys.filterNot { it == partitionUUID }.toSet()
     }
 
     override fun broadcastRecordCache(
         txnUUID: UUID,
         localRecordCache: Map<RecordKey, RecordValue>
     ): StateFlow<ImmutableMap<UUID, Map<RecordKey, RecordValue>>> {
-        for (otherPartition in allPartitions.filterNot { it.key != partitionUUID }.values) {
+        for (otherPartition in allOtherPartitions().map { allPartitions[it]!! }) {
             otherPartition.receiveRecordCache(txnUUID, partitionUUID, localRecordCache)
         }
 
@@ -106,7 +107,9 @@ class Executor(private val executorServer: ExecutorServer) {
 
         val recordCacheFlow = executorServer.broadcastRecordCache(uniqueTxn.id, localRecordCache)
 
-        val recordCache = buildRecordCache(recordCacheFlow).toMutableMap()
+        val externalRecordCache = buildRecordCache(recordCacheFlow)
+
+        val recordCache = externalRecordCache.plus(localRecordCache).toMutableMap()
 
         // Return the result of the last operation
         for (op in uniqueTxn.txn.operations.dropLast(1)) {
@@ -128,10 +131,9 @@ class Executor(private val executorServer: ExecutorServer) {
     private suspend fun buildRecordCache(
         recordCacheFlow: StateFlow<ImmutableMap<UUID, Map<RecordKey, RecordValue>>>
     ): Map<RecordKey, RecordValue> {
-        val allPartitionUUIDs = executorServer.allOtherPartitions()
-        return recordCacheFlow.takeIf { recordCache ->
-                recordCache.value.keys == allPartitionUUIDs
-            }!!
+        val allOtherPartitionUUIDs = executorServer.allOtherPartitions()
+        return recordCacheFlow
+            .filter { recordCache -> recordCache.keys == allOtherPartitionUUIDs }
             .map { immutableRecordCache ->
                 immutableRecordCache.toMap().values.flatMap { it.entries }.associate {
                     it.key to it.value
