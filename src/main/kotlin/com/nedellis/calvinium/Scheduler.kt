@@ -3,7 +3,7 @@ package com.nedellis.calvinium
 import com.google.common.util.concurrent.Striped
 import kotlinx.coroutines.runBlocking
 
-private class LockManager() {
+private class OldLockManager() {
     // TODO: Convert to Mutex()
     private val leases = Striped.lazyWeakLock(NUM_STRIPES)
 
@@ -23,7 +23,7 @@ private class LockManager() {
 }
 
 class Scheduler(val executor: Executor) {
-    private val lm = LockManager()
+    private val lm = OldLockManager()
 
     fun run(uniqueTxn: UniqueTransaction): RecordValue {
         val keys = uniqueTxn.txn.operations.map { it.key }

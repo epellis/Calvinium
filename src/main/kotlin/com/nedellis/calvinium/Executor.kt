@@ -1,50 +1,38 @@
 package com.nedellis.calvinium
 
+import com.google.common.collect.ImmutableMap
 import java.nio.file.Files
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 import kotlin.io.path.pathString
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.SendChannel
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import org.rocksdb.Options
 import org.rocksdb.RocksDB
 
 interface ExecutorServer {
     fun isRecordLocal(recordKey: RecordKey): Boolean
-    suspend fun setPartitionValue(txnUUID: UUID, recordKey: RecordKey, recordValue: RecordValue)
-    suspend fun getPartitionValue(txnUUID: UUID, recordKey: RecordKey): RecordValue
+    fun allPartitions(): Set<UUID>
+    fun allOtherPartitions(): Set<UUID>
+    fun broadcastRecordCache(
+        txnUUID: UUID,
+        localRecordCache: Map<RecordKey, RecordValue>
+    ): StateFlow<ImmutableMap<UUID, Map<RecordKey, RecordValue>>>
 }
 
 class LocalExecutorServer(val partitionUUID: UUID) : ExecutorServer {
     private lateinit var allPartitions: Map<UUID, LocalExecutorServer>
-    private val valueCache = ConcurrentHashMap<Pair<UUID, RecordKey>, RecordValue>()
 
-    private val valueCacheWaiters = mutableMapOf<Pair<UUID, RecordKey>, SendChannel<RecordValue>>()
-    private val valueCacheWaitersLock = Mutex()
+    private val lock = ReentrantLock()
+    private val recordCacheFlowByTxnUUID =
+        mutableMapOf<UUID, MutableStateFlow<ImmutableMap<UUID, Map<RecordKey, RecordValue>>>>()
 
-    override suspend fun setPartitionValue(
-        txnUUID: UUID,
-        recordKey: RecordKey,
-        recordValue: RecordValue
-    ) {
-        valueCacheWaitersLock.withLock {
-            valueCache[Pair(txnUUID, recordKey)] = recordValue
-            valueCacheWaiters.remove(Pair(txnUUID, recordKey))?.send(recordValue)
-        }
-    }
-
-    override fun isRecordLocal(recordKey: RecordKey): Boolean {
-        return partitionForRecordKey(recordKey) == partitionUUID
-    }
-
-    override suspend fun getPartitionValue(txnUUID: UUID, recordKey: RecordKey): RecordValue {
-        val responsiblePartition = partitionForRecordKey(recordKey)
-        return allPartitions[responsiblePartition]!!.getPartitionValueRPC(txnUUID, recordKey)
-    }
-
-    fun setAllPartitions(partitions: Map<UUID, LocalExecutorServer>) {
+    fun initAllPartitions(partitions: Map<UUID, LocalExecutorServer>) {
         allPartitions = partitions
     }
 
@@ -54,19 +42,48 @@ class LocalExecutorServer(val partitionUUID: UUID) : ExecutorServer {
         return allPartitions.keys.sorted()[partitionIdx]
     }
 
-    private suspend fun getPartitionValueRPC(txnUUID: UUID, recordKey: RecordKey): RecordValue {
-        val responseChannel = Channel<RecordValue>(Channel.BUFFERED)
+    override fun isRecordLocal(recordKey: RecordKey): Boolean {
+        return partitionForRecordKey(recordKey) == partitionUUID
+    }
 
-        valueCacheWaitersLock.withLock {
-            val cachedRecordValue = valueCache[Pair(txnUUID, recordKey)]
-            if (cachedRecordValue != null) {
-                responseChannel.send(cachedRecordValue)
-            } else {
-                valueCacheWaiters[Pair(txnUUID, recordKey)] = responseChannel
-            }
+    override fun allPartitions(): Set<UUID> {
+        return allPartitions.keys
+    }
+
+    override fun allOtherPartitions(): Set<UUID> {
+        return allPartitions.keys.filter { it != partitionUUID }.toSet()
+    }
+
+    override fun broadcastRecordCache(
+        txnUUID: UUID,
+        localRecordCache: Map<RecordKey, RecordValue>
+    ): StateFlow<ImmutableMap<UUID, Map<RecordKey, RecordValue>>> {
+        for (otherPartition in allPartitions.filterNot { it.key != partitionUUID }.values) {
+            otherPartition.receiveRecordCache(txnUUID, partitionUUID, localRecordCache)
         }
 
-        return responseChannel.receive()
+        return lock.withLock {
+            recordCacheFlowByTxnUUID
+                .getOrPut(txnUUID) { MutableStateFlow(ImmutableMap.of()) }
+                .asStateFlow()
+        }
+    }
+
+    private fun receiveRecordCache(
+        txnUUID: UUID,
+        externalPartitionUUID: UUID,
+        externalRecordCache: Map<RecordKey, RecordValue>
+    ) {
+        lock.withLock {
+            val stateFlow =
+                recordCacheFlowByTxnUUID.getOrPut(txnUUID) { MutableStateFlow(ImmutableMap.of()) }
+            stateFlow.update { recordCache ->
+                ImmutableMap.builder<UUID, Map<RecordKey, RecordValue>>()
+                    .putAll(recordCache)
+                    .putAll(mapOf(externalPartitionUUID to externalRecordCache))
+                    .build()
+            }
+        }
     }
 }
 
@@ -85,7 +102,11 @@ class Executor(private val executorServer: ExecutorServer) {
     private val db = RocksDB.open(options, rocksDirectory.pathString)
 
     suspend fun run(uniqueTxn: UniqueTransaction): RecordValue {
-        val recordCache = buildRecordCache(uniqueTxn).toMutableMap()
+        val localRecordCache = buildLocalRecordCache(uniqueTxn)
+
+        val recordCacheFlow = executorServer.broadcastRecordCache(uniqueTxn.id, localRecordCache)
+
+        val recordCache = buildRecordCache(recordCacheFlow).toMutableMap()
 
         // Return the result of the last operation
         for (op in uniqueTxn.txn.operations.dropLast(1)) {
@@ -98,24 +119,25 @@ class Executor(private val executorServer: ExecutorServer) {
         return result
     }
 
-    private suspend fun buildRecordCache(
-        uniqueTxn: UniqueTransaction
-    ): Map<RecordKey, RecordValue> {
+    private fun buildLocalRecordCache(uniqueTxn: UniqueTransaction): Map<RecordKey, RecordValue> {
         val localRecordKeys =
             uniqueTxn.txn.operations.map { it.key }.filter { executorServer.isRecordLocal(it) }
-        val localRecordCache =
-            localRecordKeys.associateWith { RecordValue(db.get(it.toBytes())?.decodeToString()) }
+        return localRecordKeys.associateWith { RecordValue(db.get(it.toBytes())?.decodeToString()) }
+    }
 
-        for (localRecord in localRecordCache) {
-            executorServer.setPartitionValue(uniqueTxn.id, localRecord.key, localRecord.value)
-        }
-
-        val externalRecordKeys =
-            uniqueTxn.txn.operations.map { it.key }.filterNot { executorServer.isRecordLocal(it) }
-        val externalRecordCache =
-            externalRecordKeys.associateWith { executorServer.getPartitionValue(uniqueTxn.id, it) }
-
-        return localRecordCache.plus(externalRecordCache)
+    private suspend fun buildRecordCache(
+        recordCacheFlow: StateFlow<ImmutableMap<UUID, Map<RecordKey, RecordValue>>>
+    ): Map<RecordKey, RecordValue> {
+        val allPartitionUUIDs = executorServer.allOtherPartitions()
+        return recordCacheFlow.takeIf { recordCache ->
+                recordCache.value.keys == allPartitionUUIDs
+            }!!
+            .map { immutableRecordCache ->
+                immutableRecordCache.toMap().values.flatMap { it.entries }.associate {
+                    it.key to it.value
+                }
+            }
+            .first()
     }
 
     private fun flushRecordCache(txnUUID: UUID, recordCache: Map<RecordKey, RecordValue>) {
