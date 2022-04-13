@@ -7,8 +7,8 @@ import java.util.UUID
 class IntegrationSuite :
     FunSpec({
         test("E2E Test 1 replica, 1 partition") {
-            val localExecutor = LocalExecutorServer()
-            localExecutor.setAllReplicas(mapOf(UUID.randomUUID() to localExecutor))
+            val localExecutor = LocalExecutorServer(UUID.randomUUID())
+            localExecutor.setAllPartitions(mapOf(localExecutor.partitionUUID to localExecutor))
 
             val sequencer = Sequencer(Scheduler(Executor(localExecutor)))
 

@@ -8,17 +8,17 @@ plugins {
 }
 
 group = "com.nedellis"
+
 version = "1.0-SNAPSHOT"
 
-repositories {
-    mavenCentral()
-}
+repositories { mavenCentral() }
 
 val KOTEST_VERSION = "5.2.2"
 
 dependencies {
     implementation("com.google.guava:guava:31.1-jre")
     implementation("org.rocksdb:rocksdbjni:7.0.4")
+    implementation("dev.failsafe:failsafe:3.2.3")
 
     testImplementation(kotlin("test"))
     testImplementation("io.kotest:kotest-runner-junit5:$KOTEST_VERSION")
@@ -26,25 +26,15 @@ dependencies {
     testImplementation("io.mockk:mockk:1.12.3")
 }
 
-tasks.test {
-    useJUnitPlatform()
-}
+tasks.test { useJUnitPlatform() }
 
-tasks.withType<KotlinCompile> {
-    kotlinOptions.jvmTarget = "1.8"
-}
+tasks.withType<KotlinCompile> { kotlinOptions.jvmTarget = "1.8" }
 
-application {
-    mainClass.set("MainKt")
-}
+application { mainClass.set("MainKt") }
 
 jib {
-    from {
-        image = "eclipse-temurin:17-jre-alpine"
-    }
-    to {
-        image = "epelesis/calvinium"
-    }
+    from { image = "eclipse-temurin:17-jre-alpine" }
+    to { image = "epelesis/calvinium" }
 }
 
 ktfmt { kotlinLangStyle() }
