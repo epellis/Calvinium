@@ -1,6 +1,7 @@
 package com.nedellis.calvinium
 
 import com.google.common.primitives.Longs
+import com.google.common.primitives.Shorts
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -10,11 +11,15 @@ data class Operation(val key: RecordKey, val type: OperationType)
 
 data class RecordKey(val tableId: Long, val keyId: Long) : Comparable<RecordKey> {
     fun toBytes(): ByteArray {
-        val digest =
-            MessageDigest.getInstance("MD5").digest(Longs.toByteArray(tableId).plus(Longs.toByteArray(keyId)))!!
-        return digest.take(VIRTUAL_NODE_BYTES).toByteArray()
+        return Shorts.toByteArray(virtualNodeId())
             .plus(Longs.toByteArray(tableId))
             .plus(Longs.toByteArray(keyId))
+    }
+
+    fun virtualNodeId(): Short {
+        val digest =
+            MessageDigest.getInstance("MD5").digest(Longs.toByteArray(tableId).plus(Longs.toByteArray(keyId)))!!
+        return Shorts.fromBytes(digest[0], digest[1])
     }
 
     companion object {
