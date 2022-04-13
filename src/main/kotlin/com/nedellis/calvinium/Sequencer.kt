@@ -3,6 +3,7 @@ package com.nedellis.calvinium
 import com.google.common.util.concurrent.AbstractExecutionThreadService
 import java.util.UUID
 import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.TimeUnit
 
 private data class QueuedTxn(
     val uniqueTransaction: UniqueTransaction,
@@ -15,10 +16,14 @@ class LocalSequencerService(private val scheduler: Scheduler) : AbstractExecutio
     private lateinit var otherSequencers: List<LocalSequencerService>
 
     override fun run() {
-        val txn = workQueue.take()
-        val result = scheduler.run(txn.uniqueTransaction)
-        if (txn.shouldReturnResults) {
-            resultsQueue.put(result)
+        while (isRunning) {
+            val txn = workQueue.poll(1, TimeUnit.SECONDS)
+            if (txn != null) {
+                val result = scheduler.run(txn.uniqueTransaction)
+                if (txn.shouldReturnResults) {
+                    resultsQueue.put(result)
+                }
+            }
         }
     }
 
