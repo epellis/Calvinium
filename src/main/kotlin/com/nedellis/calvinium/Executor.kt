@@ -1,6 +1,5 @@
 package com.nedellis.calvinium
 
-import org.rocksdb.ColumnFamilyHandle
 import org.rocksdb.Options
 import org.rocksdb.RocksDB
 import java.nio.file.Files

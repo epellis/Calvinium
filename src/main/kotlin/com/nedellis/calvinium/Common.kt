@@ -5,6 +5,7 @@ import java.security.MessageDigest
 import java.util.UUID
 
 data class Transaction(val operations: List<Operation>)
+
 data class Operation(val key: RecordKey, val type: OperationType)
 
 data class RecordKey(val tableId: Long, val keyId: Long) : Comparable<RecordKey> {
@@ -21,18 +22,9 @@ data class RecordKey(val tableId: Long, val keyId: Long) : Comparable<RecordKey>
     }
 
     override fun compareTo(other: RecordKey): Int {
-        if (tableId > other.tableId) {
-            return 1
-        } else if (tableId < other.tableId) {
-            return -1
-        } else {
-            if (keyId > other.keyId) {
-                return 1
-            } else if (keyId < other.keyId) {
-                return -1
-            } else {
-                return 0
-            }
+        return when {
+            (tableId == other.tableId) -> (keyId - other.keyId).toInt()
+            else -> (tableId - other.tableId).toInt()
         }
     }
 }
