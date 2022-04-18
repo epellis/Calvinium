@@ -1,93 +1,71 @@
 package com.nedellis.calvinium
 
 import com.google.common.util.concurrent.ServiceManager
+import io.kotest.common.runBlocking
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.datatest.withData
 import io.kotest.matchers.shouldBe
 import java.util.UUID
 
-class IntegrationSuite : FunSpec() {
-    // TODO: Specify which replica mutations are executed on
-    // TODO: Test transactions
-    private data class OperationTestCase(val op: Operation, val result: RecordValue)
+// TODO: Specify which replica mutations are executed on
+// TODO: Test transactions
+// TODO: FPGA style testing with a software model of the DB
 
-    private suspend fun assertTransaction(
-        transactions: List<OperationTestCase>,
-        replicas: Int = 1
-    ) {
-        System.setProperty(org.slf4j.impl.SimpleLogger.DEFAULT_LOG_LEVEL_KEY, "TRACE")
+private data class LogicTest(val op: Operation, val expectedResult: RecordValue)
 
-        val localExecutors =
-            (0 until replicas).map { idx -> LocalExecutorServer(UUID(0, idx.toLong())) }
-        for (ex in localExecutors) {
-            ex.initAllPartitions(localExecutors.associateBy { it.partitionUUID })
-        }
-        val sequencers = localExecutors.map { LocalSequencerService(Scheduler(Executor(it))) }
+private val basicReadWriteTest =
+    listOf(
+        LogicTest(Operation(RecordKey(0, 0), Get), RecordValue()),
+        LogicTest(Operation(RecordKey(0, 0), Put("B")), RecordValue("B")),
+        LogicTest(Operation(RecordKey(0, 0), Get), RecordValue("B")),
+        LogicTest(Operation(RecordKey(0, 0), Delete), RecordValue("B")),
+        LogicTest(Operation(RecordKey(0, 0), Get), RecordValue()),
+    )
 
-        for (seq in sequencers) {
-            seq.setAllSequencers(sequencers)
-        }
-
-        val serviceManager = ServiceManager(sequencers)
-        serviceManager.startAsync()
-        serviceManager.awaitHealthy()
-
-        for (txnTest in transactions) {
-            when (txnTest.op.type) {
-                Get ->
-                    for (seq in sequencers) {
-                        seq.executeTxn(Transaction(listOf(txnTest.op))) shouldBe txnTest.result
-                    }
-                is Put, Delete ->
-                    sequencers[0].executeTxn(Transaction(listOf(txnTest.op))) shouldBe
-                        txnTest.result
+class LogicSuite :
+    FunSpec({
+        context("Test Logic") {
+            withData(listOf(1, 3, 5, 10)) { replicas ->
+                withData(listOf(basicReadWriteTest)) { tests ->
+                    assertTransactionLogic(replicas, tests)
+                }
             }
         }
-    }
+    }) {
+    companion object {
+        private fun assertTransactionLogic(replicas: Int, tests: List<LogicTest>) {
+            runBlocking {
+                System.setProperty(org.slf4j.impl.SimpleLogger.DEFAULT_LOG_LEVEL_KEY, "TRACE")
 
-    init {
-        test("E2E Test 1 replica, 1 partition").config(testCoroutineDispatcher = true) {
-            val key = RecordKey(0, 0)
+                val localExecutors =
+                    (0 until replicas).map { idx -> LocalExecutorServer(UUID(0, idx.toLong())) }
+                for (ex in localExecutors) {
+                    ex.initAllPartitions(localExecutors.associateBy { it.partitionUUID })
+                }
+                val sequencers =
+                    localExecutors.map { LocalSequencerService(Scheduler(Executor(it))) }
 
-            val testCases =
-                listOf(
-                    OperationTestCase(Operation(key, Get), RecordValue()),
-                    OperationTestCase(Operation(key, Put("B")), RecordValue("B")),
-                    OperationTestCase(Operation(key, Get), RecordValue("B")),
-                    OperationTestCase(Operation(key, Delete), RecordValue("B")),
-                    OperationTestCase(Operation(key, Get), RecordValue()),
-                )
+                for (seq in sequencers) {
+                    seq.setAllSequencers(sequencers)
+                }
 
-            assertTransaction(testCases, 1)
-        }
+                val serviceManager = ServiceManager(sequencers)
+                serviceManager.startAsync()
+                serviceManager.awaitHealthy()
 
-        test("E2E Test 1 replica, 2 partition").config(testCoroutineDispatcher = true) {
-            val key = RecordKey(0, 0)
-
-            val testCases =
-                listOf(
-                    OperationTestCase(Operation(key, Get), RecordValue()),
-                    OperationTestCase(Operation(key, Put("B")), RecordValue("B")),
-                    OperationTestCase(Operation(key, Get), RecordValue("B")),
-                    OperationTestCase(Operation(key, Delete), RecordValue("B")),
-                    OperationTestCase(Operation(key, Get), RecordValue()),
-                )
-
-            assertTransaction(testCases, 2)
-        }
-
-        test("E2E Test 1 replica, 5 partition").config(testCoroutineDispatcher = true) {
-            val key = RecordKey(0, 0)
-
-            val testCases =
-                listOf(
-                    OperationTestCase(Operation(key, Get), RecordValue()),
-                    OperationTestCase(Operation(key, Put("B")), RecordValue("B")),
-                    OperationTestCase(Operation(key, Get), RecordValue("B")),
-                    OperationTestCase(Operation(key, Delete), RecordValue("B")),
-                    OperationTestCase(Operation(key, Get), RecordValue()),
-                )
-
-            assertTransaction(testCases, 5)
+                for (test in tests) {
+                    when (test.op.type) {
+                        Get ->
+                            for (seq in sequencers) {
+                                seq.executeTxn(Transaction(listOf(test.op))) shouldBe
+                                    test.expectedResult
+                            }
+                        is Put, Delete ->
+                            sequencers[0].executeTxn(Transaction(listOf(test.op))) shouldBe
+                                test.expectedResult
+                    }
+                }
+            }
         }
     }
 }
