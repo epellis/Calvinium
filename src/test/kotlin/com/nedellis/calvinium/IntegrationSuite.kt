@@ -5,9 +5,57 @@ import io.kotest.common.runBlocking
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
 
 class IntegrationSuite : FunSpec() {
+    // TODO: Specify which replica mutations are executed on
+    // TODO: Test transactions
+    private data class OperationTestCase(val op: Operation, val result: RecordValue)
+
+    private suspend fun assertTransaction(
+        transactions: List<OperationTestCase>,
+        replicas: Int = 1
+    ) {
+        val localExecutors =
+            (0 until replicas).map { idx -> LocalExecutorServer(UUID(0, idx.toLong())) }
+        for (ex in localExecutors) {
+            ex.initAllPartitions(localExecutors.associateBy { it.partitionUUID })
+        }
+        val sequencers = localExecutors.map { LocalSequencerService(Scheduler(Executor(it))) }
+
+        for (seq in sequencers) {
+            seq.setAllSequencers(sequencers)
+        }
+
+        for (txnTest in transactions) {
+            when (txnTest.op.type) {
+                Get ->
+                    for (seq in sequencers) {
+                        seq.executeTxn(Transaction(listOf(txnTest.op))) shouldBe txnTest.result
+                    }
+                is Put, Delete ->
+                    sequencers[0].executeTxn(Transaction(listOf(txnTest.op))) shouldBe
+                        txnTest.result
+            }
+        }
+    }
+
     init {
+        test("E2E Test 1 replica, 1 partition, mk2").config(timeout = 1000.milliseconds) {
+            val key = RecordKey(0, 0)
+
+            val testCases =
+                listOf(
+                    OperationTestCase(Operation(key, Get), RecordValue()),
+                    OperationTestCase(Operation(key, Put("B")), RecordValue("B")),
+                    OperationTestCase(Operation(key, Get), RecordValue("B")),
+                    OperationTestCase(Operation(key, Delete), RecordValue("B")),
+                    OperationTestCase(Operation(key, Get), RecordValue()),
+                )
+
+            assertTransaction(testCases, 1)
+        }
+
         test("E2E Test 1 replica, 1 partition").config(testCoroutineDispatcher = true) {
             val localExecutors = listOf(LocalExecutorServer(UUID.randomUUID()))
             for (ex in localExecutors) {
@@ -16,7 +64,7 @@ class IntegrationSuite : FunSpec() {
             val sequencers = localExecutors.map { LocalSequencerService(Scheduler(Executor(it))) }
 
             for (seq in sequencers) {
-                seq.setOtherSequencers(listOf())
+                seq.setAllSequencers(listOf())
             }
 
             val serviceManager = ServiceManager(sequencers)
@@ -50,8 +98,8 @@ class IntegrationSuite : FunSpec() {
             }
             val sequencers = localExecutors.map { LocalSequencerService(Scheduler(Executor(it))) }
 
-            sequencers[0].setOtherSequencers(listOf(sequencers[1]))
-            sequencers[1].setOtherSequencers(listOf(sequencers[0]))
+            sequencers[0].setAllSequencers(sequencers)
+            sequencers[1].setAllSequencers(sequencers)
 
             val serviceManager = ServiceManager(sequencers)
             serviceManager.startAsync()

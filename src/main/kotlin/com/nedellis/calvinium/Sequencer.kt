@@ -33,8 +33,8 @@ class LocalSequencerService(private val scheduler: Scheduler) : AbstractExecutio
         }
     }
 
-    fun setOtherSequencers(sequencers: List<LocalSequencerService>) {
-        otherSequencers = sequencers
+    fun setAllSequencers(sequencers: List<LocalSequencerService>) {
+        otherSequencers = sequencers.filter { s -> s != this }
     }
 
     private suspend fun executeTxnRPC(txn: UniqueTransaction) {
