@@ -13,7 +13,7 @@ import java.util.UUID
 
 private data class LogicTest(val op: Operation, val expectedResult: RecordValue)
 
-private val basicReadWriteTest =
+private val singleKeyLifecycleTest =
     listOf(
         LogicTest(Operation(RecordKey(0, 0), Get), RecordValue()),
         LogicTest(Operation(RecordKey(0, 0), Put("B")), RecordValue("B")),
@@ -22,11 +22,21 @@ private val basicReadWriteTest =
         LogicTest(Operation(RecordKey(0, 0), Get), RecordValue()),
     )
 
+private val writeDeleteWriteTest =
+    listOf(
+        LogicTest(Operation(RecordKey(0, 0), Put("A")), RecordValue("A")),
+        LogicTest(Operation(RecordKey(0, 0), Get), RecordValue("A")),
+        LogicTest(Operation(RecordKey(0, 0), Delete), RecordValue("A")),
+        LogicTest(Operation(RecordKey(0, 0), Get), RecordValue()),
+        LogicTest(Operation(RecordKey(0, 0), Put("B")), RecordValue("B")),
+        LogicTest(Operation(RecordKey(0, 0), Get), RecordValue("B")),
+    )
+
 class LogicSuite :
     FunSpec({
         context("Test Logic") {
-            withData(listOf(1, 3, 5, 10)) { replicas ->
-                withData(listOf(basicReadWriteTest)) { tests ->
+            withData(listOf(1, 3, 5)) { replicas ->
+                withData(listOf(singleKeyLifecycleTest, writeDeleteWriteTest)) { tests ->
                     assertTransactionLogic(replicas, tests)
                 }
             }
