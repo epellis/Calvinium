@@ -16,6 +16,8 @@ class IntegrationSuite : FunSpec() {
         transactions: List<OperationTestCase>,
         replicas: Int = 1
     ) {
+        System.setProperty(org.slf4j.impl.SimpleLogger.DEFAULT_LOG_LEVEL_KEY, "TRACE")
+
         val localExecutors =
             (0 until replicas).map { idx -> LocalExecutorServer(UUID(0, idx.toLong())) }
         for (ex in localExecutors) {
@@ -26,6 +28,10 @@ class IntegrationSuite : FunSpec() {
         for (seq in sequencers) {
             seq.setAllSequencers(sequencers)
         }
+
+        val serviceManager = ServiceManager(sequencers)
+        serviceManager.startAsync()
+        serviceManager.awaitHealthy()
 
         for (txnTest in transactions) {
             when (txnTest.op.type) {
@@ -41,7 +47,8 @@ class IntegrationSuite : FunSpec() {
     }
 
     init {
-        test("E2E Test 1 replica, 1 partition, mk2").config(timeout = 1000.milliseconds) {
+        test("E2E Test 1 replica, 1 partition, mk2").config(
+                timeout = 1000.milliseconds, testCoroutineDispatcher = true) {
             val key = RecordKey(0, 0)
 
             val testCases =

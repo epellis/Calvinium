@@ -19,10 +19,12 @@ dependencies {
     implementation("com.google.guava:guava:31.1-jre")
     implementation("org.rocksdb:rocksdbjni:7.0.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.1")
+    implementation("io.github.microutils:kotlin-logging-jvm:2.1.21")
+    implementation("org.slf4j:slf4j-simple:1.7.36")
 
     testImplementation(kotlin("test"))
-    testImplementation("io.kotest:kotest-runner-junit5:$KOTEST_VERSION")
-    testImplementation("io.kotest:kotest-assertions-core:$KOTEST_VERSION")
+    testImplementation("io.kotest:kotest-runner-junit5:5.2.3")
+    testImplementation("io.kotest:kotest-assertions-core:5.2.3")
     testImplementation("io.mockk:mockk:1.12.3")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.6.1")
 }

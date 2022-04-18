@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import mu.KotlinLogging
 
 private data class QueuedTxn(
     val uniqueTransaction: UniqueTransaction,
@@ -16,6 +17,7 @@ private data class QueuedTxn(
 )
 
 class LocalSequencerService(private val scheduler: Scheduler) : AbstractExecutionThreadService() {
+    private val logger = KotlinLogging.logger {}
     private val workChannel = Channel<QueuedTxn>()
     private lateinit var otherSequencers: List<LocalSequencerService>
 
@@ -45,12 +47,17 @@ class LocalSequencerService(private val scheduler: Scheduler) : AbstractExecutio
         val uniqueTxn = UniqueTransaction(UUID.randomUUID(), txn)
         val resultsChannel = Channel<RecordValue>()
 
+        logger.debug { "Initiating TXN: $txn..." }
+        logger.debug { "Sequencers: $otherSequencers" }
+
         withContext(Dispatchers.Default) {
             for (seq in otherSequencers) {
                 launch { seq.executeTxnRPC(uniqueTxn) }
             }
             launch { workChannel.send(QueuedTxn(uniqueTxn, resultsChannel)) }
         }
+
+        logger.debug { "Waiting on TXN: $txn..." }
 
         return resultsChannel.receive()
     }

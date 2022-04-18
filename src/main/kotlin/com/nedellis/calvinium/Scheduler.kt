@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
+import mu.KotlinLogging
 
 private class LockManager() {
     private val lock = ReentrantLock()
@@ -97,10 +98,12 @@ private class LockManager() {
 }
 
 class Scheduler(private val executor: Executor) {
+    private val logger = KotlinLogging.logger {}
     private val lm = LockManager()
 
     suspend fun run(uniqueTxn: UniqueTransaction): RecordValue {
         val keys = uniqueTxn.txn.operations.map { it.key }
+        logger.debug { "Scheduler starting TXN: $uniqueTxn" }
         return lm.withLocks(uniqueTxn.id, keys.sorted()) { runBlocking { executor.run(uniqueTxn) } }
     }
 }
