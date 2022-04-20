@@ -23,7 +23,8 @@ class RaftSuite :
             val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
             val stateMachine =
                 buildArbitraryRaftStateMachine(
-                    RaftState.Candidate(State(id, currentTerm = 1, votedFor = id)))
+                    RaftState.Candidate(State(id, currentTerm = 1, votedFor = id))
+                )
             val transition =
                 stateMachine.transition(RaftEvent.CandidateElectionTimeOut) as
                     StateMachine.Transition.Valid<*, *, *>
@@ -37,7 +38,8 @@ class RaftSuite :
             val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
             val stateMachine =
                 buildArbitraryRaftStateMachine(
-                    RaftState.Candidate(State(id, currentTerm = 1, votedFor = id)))
+                    RaftState.Candidate(State(id, currentTerm = 1, votedFor = id))
+                )
             val transition =
                 stateMachine.transition(RaftEvent.CandidateMajorityVotesReceived) as
                     StateMachine.Transition.Valid<*, *, *>
@@ -51,7 +53,8 @@ class RaftSuite :
             val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
             val stateMachine =
                 buildArbitraryRaftStateMachine(
-                    RaftState.Candidate(State(id, currentTerm = 1, votedFor = id)))
+                    RaftState.Candidate(State(id, currentTerm = 1, votedFor = id))
+                )
             val transition =
                 stateMachine.transition(RaftEvent.CandidateNewTerm(2)) as
                     StateMachine.Transition.Valid<*, *, *>

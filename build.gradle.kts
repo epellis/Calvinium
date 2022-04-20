@@ -5,6 +5,7 @@ plugins {
     application
     id("com.google.cloud.tools.jib") version "2.3.0"
     id("com.ncorti.ktfmt.gradle") version "0.8.0"
+    id("java")
 }
 
 group = "com.nedellis"
@@ -22,6 +23,7 @@ dependencies {
     implementation("io.github.microutils:kotlin-logging-jvm:2.1.21")
     implementation("org.slf4j:slf4j-simple:1.7.36")
     implementation("com.tinder.statemachine:statemachine:0.2.0")
+    implementation("io.trino:trino-parser:377")
 
     testImplementation(kotlin("test"))
     testImplementation("io.kotest:kotest-runner-junit5:5.2.3")
