@@ -2,6 +2,7 @@ package com.nedellis.calvinium.raft
 
 import com.tinder.StateMachine
 import java.util.UUID
+import kotlin.math.max
 
 data class State(
     val id: UUID,
@@ -13,6 +14,10 @@ data class State(
 ) {
     fun startElection(): State {
         return this.copy(currentTerm = currentTerm + 1, votedFor = id)
+    }
+
+    fun updateToLatestTerm(otherTerm: Int): State {
+        return this.copy(currentTerm = max(currentTerm, otherTerm), votedFor = null)
     }
 }
 
@@ -31,9 +36,8 @@ sealed class RaftEvent {
     object FollowerTimeOut : RaftEvent()
     object CandidateElectionTimeOut : RaftEvent()
     object CandidateMajorityVotesReceived : RaftEvent()
-    object CandidateNewLeaderDiscovered : RaftEvent()
-    object CandidateNewTerm : RaftEvent()
-    object LeaderDiscoversHigherTerm : RaftEvent()
+    data class CandidateNewTerm(val newTerm: Int) : RaftEvent()
+    data class LeaderDiscoversHigherTerm(val newTerm: Int) : RaftEvent()
     data class AppendEntriesRPC(
         val leaderTerm: Int,
         val leaderId: UUID,
@@ -50,10 +54,9 @@ sealed class RaftEvent {
 }
 
 sealed class RaftSideEffect {
-    data class StartElection(val currentState: State) : RaftSideEffect()
-    data class AppendEntriesResponse(val currentTerm: Int, val success: Boolean) : RaftSideEffect()
-    data class RequestVoteResponse(val currentTerm: Int, val voteGranted: Boolean) :
-        RaftSideEffect()
+    data class StartElectionResponse(val currentState: State) : RaftSideEffect()
+    data class AppendEntriesResponse(val currentState: State) : RaftSideEffect()
+    data class RequestVoteResponse(val currentState: State) : RaftSideEffect()
 }
 
 fun buildRaftStateMachine(id: UUID): StateMachine<RaftState, RaftEvent, RaftSideEffect> {
@@ -70,7 +73,7 @@ internal fun buildArbitraryRaftStateMachine(
             on<RaftEvent.FollowerTimeOut> {
                 transitionTo(
                     RaftState.Candidate(this.state.startElection()),
-                    RaftSideEffect.StartElection(this.state.startElection()))
+                    RaftSideEffect.StartElectionResponse(this.state.startElection()))
             }
         }
 
@@ -78,15 +81,16 @@ internal fun buildArbitraryRaftStateMachine(
             on<RaftEvent.CandidateElectionTimeOut> {
                 transitionTo(
                     RaftState.Candidate(this.state.startElection()),
-                    RaftSideEffect.StartElection(this.state.startElection()))
+                    RaftSideEffect.StartElectionResponse(this.state.startElection()))
             }
             on<RaftEvent.CandidateMajorityVotesReceived> {
-                transitionTo(RaftState.Leader(this.state, LeaderState()))
+                transitionTo(
+                    RaftState.Leader(this.state, LeaderState()),
+                    RaftSideEffect.AppendEntriesResponse(this.state))
             }
-            on<RaftEvent.CandidateNewLeaderDiscovered> {
-                transitionTo(RaftState.Follower(this.state))
+            on<RaftEvent.CandidateNewTerm> {
+                transitionTo(RaftState.Follower(this.state.updateToLatestTerm(it.newTerm)))
             }
-            on<RaftEvent.CandidateNewTerm> { transitionTo(RaftState.Follower(this.state)) }
         }
 
         state<RaftState.Leader> {
