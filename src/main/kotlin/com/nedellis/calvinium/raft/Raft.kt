@@ -15,7 +15,6 @@ data class State(
     fun startElection(): State {
         return this.copy(currentTerm = currentTerm + 1, votedFor = id)
     }
-
     fun updateToLatestTerm(otherTerm: Int): State {
         return this.copy(currentTerm = max(currentTerm, otherTerm), votedFor = null)
     }
