@@ -93,7 +93,9 @@ internal fun buildArbitraryRaftStateMachine(
         }
 
         state<RaftState.Leader> {
-            on<RaftEvent.LeaderDiscoversHigherTerm> { transitionTo(RaftState.Follower(this.state)) }
+            on<RaftEvent.LeaderDiscoversHigherTerm> {
+                transitionTo(RaftState.Follower(this.state.updateToLatestTerm(it.newTerm)))
+            }
         }
 
         onTransition {
