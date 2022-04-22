@@ -18,6 +18,10 @@ data class State(
     fun updateToLatestTerm(otherTerm: Int): State {
         return this.copy(currentTerm = max(currentTerm, otherTerm), votedFor = null)
     }
+    fun updateLastApplied(leaderCommitIndex: Int): State {
+        // TODO: Apply log[lastApplied] to State Machine if leaderCommitIndex > lastApplied
+        return this.copy(lastApplied = max(lastApplied, leaderCommitIndex))
+    }
 }
 
 data class LeaderState(
@@ -35,8 +39,6 @@ sealed class RaftEvent {
     object FollowerTimeOut : RaftEvent()
     object CandidateElectionTimeOut : RaftEvent()
     object CandidateMajorityVotesReceived : RaftEvent()
-    data class CandidateNewTerm(val newTerm: Int) : RaftEvent()
-    data class LeaderDiscoversHigherTerm(val newTerm: Int) : RaftEvent()
     data class AppendEntriesRPC(
         val leaderTerm: Int,
         val leaderId: UUID,
@@ -49,13 +51,14 @@ sealed class RaftEvent {
         val candidateId: UUID,
         val lastLogIndex: Int,
         val lastLogTerm: Int
-    )
+    ) : RaftEvent()
 }
 
 sealed class RaftSideEffect {
-    data class StartElectionResponse(val currentState: State) : RaftSideEffect()
-    data class AppendEntriesResponse(val currentState: State) : RaftSideEffect()
-    data class RequestVoteResponse(val currentState: State) : RaftSideEffect()
+    data class StartRequestVoteRPCRequest(val currentState: State) : RaftSideEffect()
+    data class StartAppendEntriesRPCRequest(val currentState: State) : RaftSideEffect()
+    data class AppendEntriesRPCResponse(val currentState: State) : RaftSideEffect()
+    data class RequestVoteRPCResponse(val currentState: State) : RaftSideEffect()
 }
 
 fun buildRaftStateMachine(id: UUID): StateMachine<RaftState, RaftEvent, RaftSideEffect> {
@@ -69,10 +72,37 @@ internal fun buildArbitraryRaftStateMachine(
         initialState(initialState)
 
         state<RaftState.Follower> {
+            on<RaftEvent.AppendEntriesRPC> {
+                if (it.leaderTerm > this.state.currentTerm) {
+                    transitionTo(
+                        RaftState.Candidate(
+                            this.state
+                                .updateLastApplied(it.leaderCommitIndex)
+                                .updateToLatestTerm(it.leaderTerm)
+                        )
+                    )
+                } else {
+                    transitionTo(
+                        RaftState.Candidate(this.state.updateLastApplied(it.leaderCommitIndex))
+                    )
+                }
+            }
+
+            on<RaftEvent.RequestVoteRPC> {
+                if (it.candidateTerm > this.state.currentTerm) {
+                    transitionTo(
+                        RaftState.Candidate(this.state.updateToLatestTerm(it.candidateTerm))
+                    )
+                } else {
+                    transitionTo(RaftState.Candidate(this.state))
+                }
+            }
+
             on<RaftEvent.FollowerTimeOut> {
                 transitionTo(
                     RaftState.Candidate(this.state.startElection()),
-                    RaftSideEffect.StartElectionResponse(this.state.startElection()))
+                    RaftSideEffect.StartRequestVoteRPCRequest(this.state.startElection())
+                )
             }
         }
 
@@ -80,23 +110,18 @@ internal fun buildArbitraryRaftStateMachine(
             on<RaftEvent.CandidateElectionTimeOut> {
                 transitionTo(
                     RaftState.Candidate(this.state.startElection()),
-                    RaftSideEffect.StartElectionResponse(this.state.startElection()))
+                    RaftSideEffect.StartRequestVoteRPCRequest(this.state.startElection())
+                )
             }
             on<RaftEvent.CandidateMajorityVotesReceived> {
                 transitionTo(
                     RaftState.Leader(this.state, LeaderState()),
-                    RaftSideEffect.AppendEntriesResponse(this.state))
-            }
-            on<RaftEvent.CandidateNewTerm> {
-                transitionTo(RaftState.Follower(this.state.updateToLatestTerm(it.newTerm)))
+                    RaftSideEffect.StartAppendEntriesRPCRequest(this.state)
+                )
             }
         }
 
-        state<RaftState.Leader> {
-            on<RaftEvent.LeaderDiscoversHigherTerm> {
-                transitionTo(RaftState.Follower(this.state.updateToLatestTerm(it.newTerm)))
-            }
-        }
+        state<RaftState.Leader> {}
 
         onTransition {
             val validTransition = it as? StateMachine.Transition.Valid ?: return@onTransition
