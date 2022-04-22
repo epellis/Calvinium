@@ -4,10 +4,14 @@ import com.tinder.StateMachine
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withData
 import io.kotest.matchers.shouldBe
-import kotlinx.coroutines.currentCoroutineContext
 import java.util.UUID
 
-private fun verifyTransition(startingState: RaftState, event: RaftEvent, endingState: RaftState, sideEffect: RaftSideEffect?) {
+private fun verifyTransition(
+    startingState: RaftState,
+    event: RaftEvent,
+    endingState: RaftState,
+    sideEffect: RaftSideEffect?
+) {
     val stateMachine = buildArbitraryRaftStateMachine(startingState)
     val transition = stateMachine.transition(event) as StateMachine.Transition.Valid<*, *, *>
     stateMachine.state shouldBe endingState
@@ -20,16 +24,36 @@ private val OTHER_RAFT_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
 class RaftSuite :
     FunSpec({
         context("Always convert to follower when receiving message of higher term") {
-            withData(listOf(
-                    RaftEvent.RequestVoteRPC(candidateTerm = 2, candidateId = OTHER_RAFT_ID, lastLogIndex = 0, lastLogTerm = 0),
-                    RaftEvent.AppendEntriesRPC(leaderTerm = 2, leaderId = OTHER_RAFT_ID, prevLogIndex = 0, entries = listOf(), leaderCommitIndex = 0)
-            )) { raftEvent ->
-                withData(listOf(
+            withData(
+                listOf(
+                    //                    RaftEvent.RequestVoteRPC(
+                    //                        candidateTerm = 2,
+                    //                        candidateId = OTHER_RAFT_ID,
+                    //                        lastLogIndex = 0,
+                    //                        lastLogTerm = 0
+                    //                    ),
+                    RaftEvent.AppendEntriesRPC(
+                        leaderTerm = 2,
+                        leaderId = OTHER_RAFT_ID,
+                        prevLogIndex = 0,
+                        entries = listOf(),
+                        leaderCommitIndex = 0
+                    )
+                )
+            ) { raftEvent ->
+                withData(
+                    listOf(
                         RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 1)),
                         RaftState.Candidate(State(THIS_RAFT_ID, currentTerm = 1)),
                         RaftState.Leader(State(THIS_RAFT_ID, currentTerm = 1), LeaderState()),
-                )) { raftState ->
-                    verifyTransition(raftState, raftEvent, RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 2)), null)
+                    )
+                ) { raftState ->
+                    verifyTransition(
+                        raftState,
+                        raftEvent,
+                        RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 2)),
+                        null
+                    )
                 }
             }
         }
@@ -82,31 +106,32 @@ class RaftSuite :
                 )
         }
 
-//        test("Candidate becomes follower on leader discovery") {
-//            val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
-//            val stateMachine =
-//                buildArbitraryRaftStateMachine(
-//                    RaftState.Candidate(State(id, currentTerm = 1, votedFor = id))
-//                )
-//            val transition =
-//                stateMachine.transition(RaftEvent.DiscoverHigherTerm(2)) as
-//                    StateMachine.Transition.Valid<*, *, *>
-//            stateMachine.state shouldBe
-//                RaftState.Follower(State(id = id, currentTerm = 2, votedFor = null))
-//            transition.sideEffect shouldBe null
-//        }
-//
-//        test("Leader becomes follower on higher term discovery") {
-//            val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
-//            val stateMachine =
-//                buildArbitraryRaftStateMachine(
-//                    RaftState.Leader(State(id, currentTerm = 1, votedFor = id), LeaderState())
-//                )
-//            val transition =
-//                stateMachine.transition(RaftEvent.DiscoverHigherTerm(2)) as
-//                    StateMachine.Transition.Valid<*, *, *>
-//            stateMachine.state shouldBe
-//                RaftState.Follower(State(id = id, currentTerm = 2, votedFor = null))
-//            transition.sideEffect shouldBe null
-//        }
+        //        test("Candidate becomes follower on leader discovery") {
+        //            val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
+        //            val stateMachine =
+        //                buildArbitraryRaftStateMachine(
+        //                    RaftState.Candidate(State(id, currentTerm = 1, votedFor = id))
+        //                )
+        //            val transition =
+        //                stateMachine.transition(RaftEvent.DiscoverHigherTerm(2)) as
+        //                    StateMachine.Transition.Valid<*, *, *>
+        //            stateMachine.state shouldBe
+        //                RaftState.Follower(State(id = id, currentTerm = 2, votedFor = null))
+        //            transition.sideEffect shouldBe null
+        //        }
+        //
+        //        test("Leader becomes follower on higher term discovery") {
+        //            val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
+        //            val stateMachine =
+        //                buildArbitraryRaftStateMachine(
+        //                    RaftState.Leader(State(id, currentTerm = 1, votedFor = id),
+        // LeaderState())
+        //                )
+        //            val transition =
+        //                stateMachine.transition(RaftEvent.DiscoverHigherTerm(2)) as
+        //                    StateMachine.Transition.Valid<*, *, *>
+        //            stateMachine.state shouldBe
+        //                RaftState.Follower(State(id = id, currentTerm = 2, votedFor = null))
+        //            transition.sideEffect shouldBe null
+        //        }
     })

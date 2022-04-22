@@ -75,7 +75,7 @@ internal fun buildArbitraryRaftStateMachine(
             on<RaftEvent.AppendEntriesRPC> {
                 if (it.leaderTerm > this.state.currentTerm) {
                     transitionTo(
-                        RaftState.Candidate(
+                        RaftState.Follower(
                             this.state
                                 .updateLastApplied(it.leaderCommitIndex)
                                 .updateToLatestTerm(it.leaderTerm)
@@ -107,6 +107,22 @@ internal fun buildArbitraryRaftStateMachine(
         }
 
         state<RaftState.Candidate> {
+            on<RaftEvent.AppendEntriesRPC> {
+                if (it.leaderTerm >= this.state.currentTerm) {
+                    transitionTo(
+                        RaftState.Follower(
+                            this.state
+                                .updateLastApplied(it.leaderCommitIndex)
+                                .updateToLatestTerm(it.leaderTerm)
+                        )
+                    )
+                } else {
+                    transitionTo(
+                        RaftState.Candidate(this.state.updateLastApplied(it.leaderCommitIndex))
+                    )
+                }
+            }
+
             on<RaftEvent.CandidateElectionTimeOut> {
                 transitionTo(
                     RaftState.Candidate(this.state.startElection()),
@@ -121,7 +137,21 @@ internal fun buildArbitraryRaftStateMachine(
             }
         }
 
-        state<RaftState.Leader> {}
+        state<RaftState.Leader> {
+            on<RaftEvent.AppendEntriesRPC> {
+                if (it.leaderTerm >= this.state.currentTerm) {
+                    transitionTo(
+                        RaftState.Follower(
+                            this.state
+                                .updateLastApplied(it.leaderCommitIndex)
+                                .updateToLatestTerm(it.leaderTerm)
+                        )
+                    )
+                } else {
+                    transitionTo(RaftState.Leader(this.state, this.leaderState))
+                }
+            }
+        }
 
         onTransition {
             val validTransition = it as? StateMachine.Transition.Valid ?: return@onTransition
