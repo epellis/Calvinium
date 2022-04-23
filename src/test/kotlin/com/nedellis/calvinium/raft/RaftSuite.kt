@@ -19,7 +19,7 @@ private fun verifyTransition(
 }
 
 private val THIS_RAFT_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
-private val OTHER_RAFT_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
+private val OTHER_RAFT_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 1))
 
 class RaftSuite :
     FunSpec({
@@ -52,7 +52,7 @@ class RaftSuite :
                         raftState,
                         raftEvent,
                         RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 2)),
-                        null
+                        RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, true)
                     )
                 }
             }
