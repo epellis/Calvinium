@@ -182,23 +182,23 @@ class RaftSuite :
 
         test("Leader converts to follower if response is of higher term") {
             val stateMachine =
-                    buildArbitraryRaftStateMachine(
-                            RaftState.Leader(
-                                    State(THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID),
-                                    LeaderState()
-                            )
+                buildArbitraryRaftStateMachine(
+                    RaftState.Leader(
+                        State(THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID),
+                        LeaderState()
                     )
+                )
             val transition =
-                    stateMachine.transition(
-                            RaftEvent.AppendEntriesRPCResponse(
-                                    RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = false)
-                            )
-                    ) as
-                            StateMachine.Transition.Valid<*, *, *>
-            stateMachine.state shouldBe
-                    RaftState.Follower(
-                            State(id = THIS_RAFT_ID, currentTerm = 2),
+                stateMachine.transition(
+                    RaftEvent.AppendEntriesRPCResponse(
+                        RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = false)
                     )
+                ) as
+                    StateMachine.Transition.Valid<*, *, *>
+            stateMachine.state shouldBe
+                RaftState.Follower(
+                    State(id = THIS_RAFT_ID, currentTerm = 2),
+                )
             transition.sideEffect shouldBe null
         }
     })
