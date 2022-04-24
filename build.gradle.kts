@@ -1,4 +1,14 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import com.google.protobuf.gradle.*
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.google.protobuf:protobuf-gradle-plugin:0.8.18")
+    }
+}
 
 plugins {
     kotlin("jvm") version "1.6.20"
@@ -6,6 +16,32 @@ plugins {
     id("com.google.cloud.tools.jib") version "2.3.0"
     id("com.ncorti.ktfmt.gradle") version "0.8.0"
     id("java")
+    id("com.google.protobuf") version "0.8.18"
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+tasks.withType<KotlinCompile> {
+    kotlinOptions {
+        jvmTarget = "11"
+        kotlinOptions.freeCompilerArgs += "-opt-in=kotlin.RequiresOptIn"
+    }
+}
+
+sourceSets{
+//    create("calvinium"){
+//        proto {
+//            srcDir("src/proto")
+//        }
+//    }
+    main {
+        java {
+            srcDir("build/generated/source/proto/main/java")
+        }
+    }
 }
 
 group = "com.nedellis"
@@ -24,6 +60,11 @@ dependencies {
     implementation("org.slf4j:slf4j-simple:1.7.36")
     implementation("com.tinder.statemachine:statemachine:0.2.0")
     implementation("io.trino:trino-parser:377")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.6.1")
+    runtimeOnly("io.grpc:grpc-netty-shaded:1.45.1")
+    implementation("io.grpc:grpc-protobuf:1.45.1")
+    implementation("io.grpc:grpc-stub:1.45.1")
+    compileOnly("org.apache.tomcat:annotations-api:6.0.53") // necessary for Java 9+
 
     testImplementation(kotlin("test"))
     testImplementation("io.kotest:kotest-runner-junit5:5.2.3")
@@ -45,3 +86,22 @@ jib {
 }
 
 ktfmt { kotlinLangStyle() }
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:3.20.1"
+    }
+    plugins {
+        id("grpc") {
+            artifact = "io.grpc:protoc-gen-grpc-java:1.45.1"
+        }
+    }
+    generateProtoTasks {
+        ofSourceSet("main").forEach {
+            it.plugins {
+                // Apply the "grpc" plugin whose spec is defined above, without options.
+                id("grpc")
+            }
+        }
+    }
+}
