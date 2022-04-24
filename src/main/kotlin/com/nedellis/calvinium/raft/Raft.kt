@@ -14,8 +14,8 @@ data class State(
     val currentTerm: Int = 0,
     val votedFor: UUID? = null,
     val log: ImmutableList<LogEntry> = ImmutableList.of(),
-    val commitIndex: Int = 0,
-    val lastApplied: Int = 0,
+    val commitIndex: Int = -1,
+    val lastApplied: Int = -1,
 ) {
     private val logger = KotlinLogging.logger {}
     fun startElection(): State {
@@ -32,15 +32,22 @@ data class State(
             }
             return false
         }
-        if (rpc.prevLogIndex != -1 &&
-                log.size > rpc.prevLogIndex &&
-                log[rpc.prevLogIndex].term != rpc.prevLogTerm
-        ) {
-            logger.debug {
-                "Append Entries $rpc invalid because my log ${log[rpc.prevLogIndex].term} != leader log ${rpc.prevLogTerm}"
+
+        if (rpc.prevLogIndex >= 0) {
+            val entryAtPrevLogIndex = log.getOrNull(rpc.prevLogIndex)
+            if (entryAtPrevLogIndex == null) {
+                logger.debug {
+                    "Append Entries $rpc invalid because my log has no entry at ${rpc.prevLogIndex}"
+                }
+                return false
+            } else if (entryAtPrevLogIndex.term != rpc.prevLogTerm) {
+                logger.debug {
+                    "Append Entries $rpc invalid because my log ${entryAtPrevLogIndex.term} != leader log ${rpc.prevLogTerm}"
+                }
+                return false
             }
-            return false
         }
+
         return true
     }
 
@@ -83,7 +90,9 @@ data class State(
         entries: ImmutableList<LogEntry>
     ): Int? {
         for (i in 0 until entries.size) {
-            if (log[i + prevLogIndex + 1].term != entries[i].term) {
+            if (i + prevLogIndex + 1 >= log.size ||
+                    log[i + prevLogIndex + 1].term != entries[i].term
+            ) {
                 return i
             }
         }
@@ -175,16 +184,16 @@ sealed interface RaftEvent {
     data class AppendEntriesRPC(
         val leaderTerm: Int,
         val leaderId: UUID,
-        val prevLogIndex: Int,
-        val prevLogTerm: Int,
-        val leaderCommitIndex: Int,
+        val prevLogIndex: Int = -1,
+        val prevLogTerm: Int = -1,
+        val leaderCommitIndex: Int = -1,
         val entries: ImmutableList<LogEntry> = ImmutableList.of(),
     ) : RaftEvent
     data class RequestVoteRPC(
         val candidateTerm: Int,
         val candidateId: UUID,
-        val lastLogIndex: Int,
-        val lastLogTerm: Int
+        val lastLogIndex: Int = -1,
+        val lastLogTerm: Int = -1
     ) : RaftEvent
     data class AppendEntriesRPCResponse(val r: RaftSideEffect.AppendEntriesRPCResponse) : RaftEvent
     data class RequestVoteRPCResponse(val r: RaftSideEffect.RequestVoteRPCResponse) : RaftEvent
@@ -219,7 +228,7 @@ internal fun buildArbitraryRaftStateMachine(
                     if (this.state.isAppendEntriesValid(it)) {
                         transitionTo(
                             this.withState(this.state.appendEntries(it)),
-                            RaftSideEffect.AppendEntriesRPCResponse(this.state.currentTerm, false)
+                            RaftSideEffect.AppendEntriesRPCResponse(this.state.currentTerm, true)
                         )
                     } else {
                         transitionTo(

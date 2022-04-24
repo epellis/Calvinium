@@ -204,7 +204,7 @@ class RaftSuite :
             transition.sideEffect shouldBe null
         }
 
-        test("Append entries fails if leader index is lower than follower") {
+        test("Append entries fails if no entry at prev log index") {
             val stateMachine =
                 buildArbitraryRaftStateMachine(
                     RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 2))
@@ -214,7 +214,7 @@ class RaftSuite :
                     RaftEvent.AppendEntriesRPC(
                         leaderTerm = 2,
                         leaderId = OTHER_RAFT_ID,
-                        prevLogIndex = -1,
+                        prevLogIndex = 0,
                         prevLogTerm = 0,
                         leaderCommitIndex = -1
                     )
@@ -231,6 +231,7 @@ class RaftSuite :
                     RaftState.Follower(
                         State(
                             THIS_RAFT_ID,
+                            commitIndex = 0,
                             currentTerm = 2,
                             log = ImmutableList.of(LogEntry(2, null))
                         )
@@ -242,16 +243,50 @@ class RaftSuite :
                         leaderTerm = 2,
                         leaderId = OTHER_RAFT_ID,
                         prevLogIndex = 0,
-                        prevLogTerm = 2,
+                        prevLogTerm = 1,
                         leaderCommitIndex = 0
                     )
                 ) as
                     StateMachine.Transition.Valid<*, *, *>
             stateMachine.state shouldBe
                 RaftState.Follower(
-                    State(THIS_RAFT_ID, currentTerm = 2, log = ImmutableList.of(LogEntry(2, null)))
+                    State(
+                        THIS_RAFT_ID,
+                        commitIndex = 0,
+                        currentTerm = 2,
+                        log = ImmutableList.of(LogEntry(2, null))
+                    )
                 )
             transition.sideEffect shouldBe
                 RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = false)
+        }
+
+        test("Append entries succeeds and doesn't rewrite the log") {
+            val stateMachine =
+                buildArbitraryRaftStateMachine(
+                    RaftState.Follower(
+                        State(
+                            THIS_RAFT_ID,
+                            currentTerm = 1,
+                        )
+                    )
+                )
+            val transition =
+                stateMachine.transition(
+                    RaftEvent.AppendEntriesRPC(
+                        leaderTerm = 1,
+                        leaderId = OTHER_RAFT_ID,
+                        prevLogIndex = -1,
+                        prevLogTerm = 1,
+                        entries = ImmutableList.of(LogEntry(1, null))
+                    )
+                ) as
+                    StateMachine.Transition.Valid<*, *, *>
+            stateMachine.state shouldBe
+                RaftState.Follower(
+                    State(THIS_RAFT_ID, currentTerm = 1, log = ImmutableList.of(LogEntry(1, null)))
+                )
+            transition.sideEffect shouldBe
+                RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 1, success = true)
         }
     })

@@ -45,8 +45,6 @@ class LogicSuite :
     companion object {
         private fun assertTransactionLogic(replicas: Int, tests: List<LogicTest>) {
             runBlocking {
-                System.setProperty(org.slf4j.impl.SimpleLogger.DEFAULT_LOG_LEVEL_KEY, "TRACE")
-
                 val localExecutors =
                     (0 until replicas).map { idx -> LocalExecutorServer(UUID(0, idx.toLong())) }
                 for (ex in localExecutors) {
