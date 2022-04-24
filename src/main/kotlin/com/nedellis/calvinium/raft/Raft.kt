@@ -13,8 +13,6 @@ data class State(
     val commitIndex: Int = 0,
     val lastApplied: Int = 0,
 ) {
-    private val logger = KotlinLogging.logger {}
-
     fun startElection(): State {
         return this.copy(currentTerm = currentTerm + 1, votedFor = id)
     }
@@ -31,9 +29,6 @@ data class State(
     }
 
     fun tryGrantVote(candidateId: UUID, candidateTerm: Int): State {
-        logger.debug {
-            "Try Grant Vote: VotedFor=$votedFor, CurrentTerm=$currentTerm, Candidate=$candidateId, CandidateTerm=$candidateTerm"
-        }
         return if ((votedFor == null || votedFor == candidateId) && candidateTerm >= currentTerm) {
             this.copy(votedFor = candidateId)
         } else {
@@ -48,33 +43,35 @@ data class LeaderState(
 )
 
 sealed interface RaftState {
-    fun state(): State
+    val state: State
     fun withState(newState: State): RaftState
 
-    data class Follower(val state: State) : RaftState {
-        override fun state(): State {
-            return this.state
+    data class Follower(override val state: State) : RaftState {
+        override fun withState(newState: State): RaftState {
+            return this.copy(state = newState)
         }
+    }
 
+    data class Candidate(override val state: State) : RaftState {
         override fun withState(newState: State): RaftState {
-            return Follower(newState)
+            return this.copy(state = newState)
         }
     }
-    data class Candidate(val state: State) : RaftState {
-        override fun state(): State {
-            return this.state
-        }
+
+    data class Leader(override val state: State, val leaderState: LeaderState) : RaftState {
         override fun withState(newState: State): RaftState {
-            return Follower(newState)
+            return this.copy(state = newState)
         }
     }
-    data class Leader(val state: State, val leaderState: LeaderState) : RaftState {
-        override fun state(): State {
-            return this.state
-        }
-        override fun withState(newState: State): RaftState {
-            return Follower(newState)
-        }
+
+    fun requestVoteAndUpdateToLatestTerm(candidateId: UUID, candidateTerm: Int): Pair<RaftState, RaftSideEffect.RequestVoteRPCResponse> {
+        val updatedState = this.state.updateToLatestTerm(candidateTerm).tryGrantVote(candidateId, candidateTerm)
+        return Pair(Follower(updatedState), RaftSideEffect.RequestVoteRPCResponse(updatedState.currentTerm, voteGranted = updatedState.wasVoteGranted(candidateId, candidateTerm)))
+    }
+
+    fun appendEntriesAndUpdateToLatestTerm(leaderTerm: Int, leaderCommitIndex: Int): Pair<RaftState, RaftSideEffect.AppendEntriesRPCResponse> {
+        val updatedState = this.state.updateToLatestTerm(leaderTerm).updateLastApplied(leaderCommitIndex)
+        return Pair(Follower(updatedState), RaftSideEffect.AppendEntriesRPCResponse(updatedState.currentTerm, true))
     }
 }
 
@@ -121,15 +118,8 @@ internal fun buildArbitraryRaftStateMachine(
         state<RaftState.Follower> {
             on<RaftEvent.AppendEntriesRPC> {
                 if (it.leaderTerm > this.state.currentTerm) {
-                    val updatedState =
-                        this.state
-                            .updateLastApplied(it.leaderCommitIndex)
-                            .updateToLatestTerm(it.leaderTerm)
-                    transitionTo(
-                        RaftState.Follower(updatedState),
-                        // TODO: Replace true with response of trying to append entries
-                        RaftSideEffect.AppendEntriesRPCResponse(updatedState.currentTerm, true)
-                    )
+                    val (updatedState, sideEffect) = this.appendEntriesAndUpdateToLatestTerm(it.leaderTerm, it.leaderCommitIndex)
+                    transitionTo(updatedState, sideEffect)
                 } else {
                     transitionTo(
                         RaftState.Follower(this.state.updateLastApplied(it.leaderCommitIndex))
@@ -139,18 +129,8 @@ internal fun buildArbitraryRaftStateMachine(
 
             on<RaftEvent.RequestVoteRPC> {
                 if (it.candidateTerm > this.state.currentTerm) {
-                    val updatedState =
-                        this.state
-                            .updateToLatestTerm(it.candidateTerm)
-                            .tryGrantVote(it.candidateId, it.candidateTerm)
-                    logger.debug { "RequestVote: $it, ${this.state} -> $updatedState" }
-                    transitionTo(
-                        RaftState.Follower(updatedState),
-                        RaftSideEffect.RequestVoteRPCResponse(
-                            updatedState.currentTerm,
-                            updatedState.wasVoteGranted(it.candidateId, it.candidateTerm)
-                        )
-                    )
+                    val (updatedState, sideEffect) = this.requestVoteAndUpdateToLatestTerm(it.candidateId, it.candidateTerm)
+                    transitionTo(updatedState, sideEffect)
                 } else {
                     val updatedState = this.state.tryGrantVote(it.candidateId, it.candidateTerm)
                     transitionTo(
@@ -174,14 +154,8 @@ internal fun buildArbitraryRaftStateMachine(
         state<RaftState.Candidate> {
             on<RaftEvent.AppendEntriesRPC> {
                 if (it.leaderTerm >= this.state.currentTerm) {
-                    val updatedState =
-                        this.state
-                            .updateLastApplied(it.leaderCommitIndex)
-                            .updateToLatestTerm(it.leaderTerm)
-                    transitionTo(
-                        RaftState.Follower(updatedState),
-                        RaftSideEffect.AppendEntriesRPCResponse(updatedState.currentTerm, true)
-                    )
+                    val (updatedState, sideEffect) = this.appendEntriesAndUpdateToLatestTerm(it.leaderTerm, it.leaderCommitIndex)
+                    transitionTo(updatedState, sideEffect)
                 } else {
                     transitionTo(
                         RaftState.Candidate(this.state.updateLastApplied(it.leaderCommitIndex))
@@ -191,17 +165,8 @@ internal fun buildArbitraryRaftStateMachine(
 
             on<RaftEvent.RequestVoteRPC> {
                 if (it.candidateTerm > this.state.currentTerm) {
-                    val updatedState =
-                        this.state
-                            .updateToLatestTerm(it.candidateTerm)
-                            .tryGrantVote(it.candidateId, it.candidateTerm)
-                    transitionTo(
-                        RaftState.Follower(updatedState),
-                        RaftSideEffect.RequestVoteRPCResponse(
-                            updatedState.currentTerm,
-                            updatedState.wasVoteGranted(it.candidateId, it.candidateTerm)
-                        )
-                    )
+                    val (updatedState, sideEffect) = this.requestVoteAndUpdateToLatestTerm(it.candidateId, it.candidateTerm)
+                    transitionTo(updatedState, sideEffect)
                 } else {
                     val updatedState = this.state.tryGrantVote(it.candidateId, it.candidateTerm)
                     transitionTo(
@@ -231,14 +196,8 @@ internal fun buildArbitraryRaftStateMachine(
         state<RaftState.Leader> {
             on<RaftEvent.AppendEntriesRPC> {
                 if (it.leaderTerm >= this.state.currentTerm) {
-                    val updatedState =
-                        this.state
-                            .updateLastApplied(it.leaderCommitIndex)
-                            .updateToLatestTerm(it.leaderTerm)
-                    transitionTo(
-                        RaftState.Follower(updatedState),
-                        RaftSideEffect.AppendEntriesRPCResponse(updatedState.currentTerm, true)
-                    )
+                    val (updatedState, sideEffect) = this.appendEntriesAndUpdateToLatestTerm(it.leaderTerm, it.leaderCommitIndex)
+                    transitionTo(updatedState, sideEffect)
                 } else {
                     transitionTo(RaftState.Leader(this.state, this.leaderState))
                 }
@@ -246,17 +205,8 @@ internal fun buildArbitraryRaftStateMachine(
 
             on<RaftEvent.RequestVoteRPC> {
                 if (it.candidateTerm > this.state.currentTerm) {
-                    val updatedState =
-                        this.state
-                            .updateToLatestTerm(it.candidateTerm)
-                            .tryGrantVote(it.candidateId, it.candidateTerm)
-                    transitionTo(
-                        RaftState.Follower(updatedState),
-                        RaftSideEffect.RequestVoteRPCResponse(
-                            updatedState.currentTerm,
-                            updatedState.wasVoteGranted(it.candidateId, it.candidateTerm)
-                        )
-                    )
+                    val (updatedState, sideEffect) = this.requestVoteAndUpdateToLatestTerm(it.candidateId, it.candidateTerm)
+                    transitionTo(updatedState, sideEffect)
                 } else {
                     val updatedState = this.state.tryGrantVote(it.candidateId, it.candidateTerm)
                     transitionTo(
