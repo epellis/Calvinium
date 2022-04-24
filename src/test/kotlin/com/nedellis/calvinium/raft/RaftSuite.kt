@@ -289,4 +289,68 @@ class RaftSuite :
             transition.sideEffect shouldBe
                 RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 1, success = true)
         }
+
+        test("Append entries succeeds and does rewrite the log 1") {
+            val stateMachine =
+                buildArbitraryRaftStateMachine(
+                    RaftState.Follower(
+                        State(
+                            THIS_RAFT_ID,
+                            currentTerm = 2,
+                            log = ImmutableList.of(LogEntry(1, null))
+                        )
+                    )
+                )
+            val transition =
+                stateMachine.transition(
+                    RaftEvent.AppendEntriesRPC(
+                        leaderTerm = 2,
+                        leaderId = OTHER_RAFT_ID,
+                        prevLogIndex = -1,
+                        prevLogTerm = 1,
+                        entries = ImmutableList.of(LogEntry(2, null))
+                    )
+                ) as
+                    StateMachine.Transition.Valid<*, *, *>
+            stateMachine.state shouldBe
+                RaftState.Follower(
+                    State(THIS_RAFT_ID, currentTerm = 2, log = ImmutableList.of(LogEntry(2, null)))
+                )
+            transition.sideEffect shouldBe
+                RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = true)
+        }
+
+        test("Append entries succeeds and does rewrite the log 2") {
+            val stateMachine =
+                buildArbitraryRaftStateMachine(
+                    RaftState.Follower(
+                        State(
+                            THIS_RAFT_ID,
+                            currentTerm = 2,
+                            log = ImmutableList.of(LogEntry(1, null), LogEntry(1, null))
+                        )
+                    )
+                )
+            val transition =
+                stateMachine.transition(
+                    RaftEvent.AppendEntriesRPC(
+                        leaderTerm = 2,
+                        leaderId = OTHER_RAFT_ID,
+                        prevLogIndex = -1,
+                        prevLogTerm = 1,
+                        entries = ImmutableList.of(LogEntry(1, null), LogEntry(2, null))
+                    )
+                ) as
+                    StateMachine.Transition.Valid<*, *, *>
+            stateMachine.state shouldBe
+                RaftState.Follower(
+                    State(
+                        THIS_RAFT_ID,
+                        currentTerm = 2,
+                        log = ImmutableList.of(LogEntry(1, null), LogEntry(2, null))
+                    )
+                )
+            transition.sideEffect shouldBe
+                RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = true)
+        }
     })
