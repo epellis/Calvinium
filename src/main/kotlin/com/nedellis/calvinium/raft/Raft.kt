@@ -3,6 +3,7 @@ package com.nedellis.calvinium.raft
 import com.tinder.StateMachine
 import java.util.UUID
 import kotlin.math.max
+import mu.KotlinLogging
 
 data class State(
     val id: UUID,
@@ -12,6 +13,8 @@ data class State(
     val commitIndex: Int = 0,
     val lastApplied: Int = 0,
 ) {
+    private val logger = KotlinLogging.logger {}
+
     fun startElection(): State {
         return this.copy(currentTerm = currentTerm + 1, votedFor = id)
     }
@@ -22,6 +25,21 @@ data class State(
         // TODO: Apply log[lastApplied] to State Machine if leaderCommitIndex > lastApplied
         return this.copy(lastApplied = max(lastApplied, leaderCommitIndex))
     }
+
+    fun wasVoteGranted(candidateId: UUID, candidateTerm: Int): Boolean {
+        return (votedFor == candidateId && candidateTerm >= currentTerm)
+    }
+
+    fun tryGrantVote(candidateId: UUID, candidateTerm: Int): State {
+        logger.debug {
+            "Try Grant Vote: VotedFor=$votedFor, CurrentTerm=$currentTerm, Candidate=$candidateId, CandidateTerm=$candidateTerm"
+        }
+        return if ((votedFor == null || votedFor == candidateId) && candidateTerm >= currentTerm) {
+            this.copy(votedFor = candidateId)
+        } else {
+            this
+        }
+    }
 }
 
 data class LeaderState(
@@ -29,10 +47,35 @@ data class LeaderState(
     val matchIndex: Map<UUID, Int> = mapOf()
 )
 
-sealed class RaftState {
-    data class Follower(val state: State) : RaftState()
-    data class Candidate(val state: State) : RaftState()
-    data class Leader(val state: State, val leaderState: LeaderState) : RaftState()
+sealed interface RaftState {
+    fun state(): State
+    fun withState(newState: State): RaftState
+
+    data class Follower(val state: State) : RaftState {
+        override fun state(): State {
+            return this.state
+        }
+
+        override fun withState(newState: State): RaftState {
+            return Follower(newState)
+        }
+    }
+    data class Candidate(val state: State) : RaftState {
+        override fun state(): State {
+            return this.state
+        }
+        override fun withState(newState: State): RaftState {
+            return Follower(newState)
+        }
+    }
+    data class Leader(val state: State, val leaderState: LeaderState) : RaftState {
+        override fun state(): State {
+            return this.state
+        }
+        override fun withState(newState: State): RaftState {
+            return Follower(newState)
+        }
+    }
 }
 
 sealed class RaftEvent {
@@ -59,7 +102,8 @@ sealed class RaftSideEffect {
     data class StartAppendEntriesRPCRequest(val currentState: State) : RaftSideEffect()
     data class AppendEntriesRPCResponse(val clientTerm: Int, val success: Boolean) :
         RaftSideEffect()
-    data class RequestVoteRPCResponse(val currentState: State) : RaftSideEffect()
+    data class RequestVoteRPCResponse(val clientTerm: Int, val voteGranted: Boolean) :
+        RaftSideEffect()
 }
 
 fun buildRaftStateMachine(id: UUID): StateMachine<RaftState, RaftEvent, RaftSideEffect> {
@@ -69,6 +113,8 @@ fun buildRaftStateMachine(id: UUID): StateMachine<RaftState, RaftEvent, RaftSide
 internal fun buildArbitraryRaftStateMachine(
     initialState: RaftState
 ): StateMachine<RaftState, RaftEvent, RaftSideEffect> {
+    val logger = KotlinLogging.logger {}
+
     return StateMachine.create {
         initialState(initialState)
 
@@ -93,11 +139,27 @@ internal fun buildArbitraryRaftStateMachine(
 
             on<RaftEvent.RequestVoteRPC> {
                 if (it.candidateTerm > this.state.currentTerm) {
+                    val updatedState =
+                        this.state
+                            .updateToLatestTerm(it.candidateTerm)
+                            .tryGrantVote(it.candidateId, it.candidateTerm)
+                    logger.debug { "RequestVote: $it, ${this.state} -> $updatedState" }
                     transitionTo(
-                        RaftState.Candidate(this.state.updateToLatestTerm(it.candidateTerm))
+                        RaftState.Follower(updatedState),
+                        RaftSideEffect.RequestVoteRPCResponse(
+                            updatedState.currentTerm,
+                            updatedState.wasVoteGranted(it.candidateId, it.candidateTerm)
+                        )
                     )
                 } else {
-                    transitionTo(RaftState.Candidate(this.state))
+                    val updatedState = this.state.tryGrantVote(it.candidateId, it.candidateTerm)
+                    transitionTo(
+                        RaftState.Follower(updatedState),
+                        RaftSideEffect.RequestVoteRPCResponse(
+                            updatedState.currentTerm,
+                            updatedState.wasVoteGranted(it.candidateId, it.candidateTerm)
+                        )
+                    )
                 }
             }
 
@@ -123,6 +185,31 @@ internal fun buildArbitraryRaftStateMachine(
                 } else {
                     transitionTo(
                         RaftState.Candidate(this.state.updateLastApplied(it.leaderCommitIndex))
+                    )
+                }
+            }
+
+            on<RaftEvent.RequestVoteRPC> {
+                if (it.candidateTerm > this.state.currentTerm) {
+                    val updatedState =
+                        this.state
+                            .updateToLatestTerm(it.candidateTerm)
+                            .tryGrantVote(it.candidateId, it.candidateTerm)
+                    transitionTo(
+                        RaftState.Follower(updatedState),
+                        RaftSideEffect.RequestVoteRPCResponse(
+                            updatedState.currentTerm,
+                            updatedState.wasVoteGranted(it.candidateId, it.candidateTerm)
+                        )
+                    )
+                } else {
+                    val updatedState = this.state.tryGrantVote(it.candidateId, it.candidateTerm)
+                    transitionTo(
+                        RaftState.Candidate(updatedState),
+                        RaftSideEffect.RequestVoteRPCResponse(
+                            updatedState.currentTerm,
+                            updatedState.wasVoteGranted(it.candidateId, it.candidateTerm)
+                        )
                     )
                 }
             }
@@ -154,6 +241,31 @@ internal fun buildArbitraryRaftStateMachine(
                     )
                 } else {
                     transitionTo(RaftState.Leader(this.state, this.leaderState))
+                }
+            }
+
+            on<RaftEvent.RequestVoteRPC> {
+                if (it.candidateTerm > this.state.currentTerm) {
+                    val updatedState =
+                        this.state
+                            .updateToLatestTerm(it.candidateTerm)
+                            .tryGrantVote(it.candidateId, it.candidateTerm)
+                    transitionTo(
+                        RaftState.Follower(updatedState),
+                        RaftSideEffect.RequestVoteRPCResponse(
+                            updatedState.currentTerm,
+                            updatedState.wasVoteGranted(it.candidateId, it.candidateTerm)
+                        )
+                    )
+                } else {
+                    val updatedState = this.state.tryGrantVote(it.candidateId, it.candidateTerm)
+                    transitionTo(
+                        RaftState.Leader(updatedState, this.leaderState),
+                        RaftSideEffect.RequestVoteRPCResponse(
+                            updatedState.currentTerm,
+                            updatedState.wasVoteGranted(it.candidateId, it.candidateTerm)
+                        )
+                    )
                 }
             }
         }

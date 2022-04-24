@@ -23,38 +23,82 @@ private val OTHER_RAFT_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 1))
 
 class RaftSuite :
     FunSpec({
-        context("Always convert to follower when receiving message of higher term") {
+        context("Always convert to follower when receiving append entries of higher term") {
             withData(
                 listOf(
-                    //                    RaftEvent.RequestVoteRPC(
-                    //                        candidateTerm = 2,
-                    //                        candidateId = OTHER_RAFT_ID,
-                    //                        lastLogIndex = 0,
-                    //                        lastLogTerm = 0
-                    //                    ),
+                    RaftState.Follower(
+                        State(
+                            THIS_RAFT_ID,
+                            currentTerm = 1,
+                        )
+                    ),
+                    RaftState.Candidate(
+                        State(
+                            THIS_RAFT_ID,
+                            currentTerm = 1,
+                        )
+                    ),
+                    RaftState.Leader(
+                        State(
+                            THIS_RAFT_ID,
+                            currentTerm = 1,
+                        ),
+                        LeaderState()
+                    ),
+                )
+            ) { raftState ->
+                verifyTransition(
+                    raftState,
                     RaftEvent.AppendEntriesRPC(
                         leaderTerm = 2,
                         leaderId = OTHER_RAFT_ID,
                         prevLogIndex = 0,
                         entries = listOf(),
                         leaderCommitIndex = 0
-                    )
+                    ),
+                    RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 2)),
+                    RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, true)
                 )
-            ) { raftEvent ->
-                withData(
-                    listOf(
-                        RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 1)),
-                        RaftState.Candidate(State(THIS_RAFT_ID, currentTerm = 1)),
-                        RaftState.Leader(State(THIS_RAFT_ID, currentTerm = 1), LeaderState()),
-                    )
-                ) { raftState ->
-                    verifyTransition(
-                        raftState,
-                        raftEvent,
-                        RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 2)),
-                        RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, true)
-                    )
-                }
+            }
+        }
+
+        context("Always convert to follower when receiving request vote of higher term") {
+            withData(
+                listOf(
+                    RaftState.Follower(
+                        State(
+                            THIS_RAFT_ID,
+                            currentTerm = 1,
+                        )
+                    ),
+                    RaftState.Candidate(
+                        State(
+                            THIS_RAFT_ID,
+                            currentTerm = 1,
+                        )
+                    ),
+                    RaftState.Leader(
+                        State(
+                            THIS_RAFT_ID,
+                            currentTerm = 1,
+                        ),
+                        LeaderState()
+                    ),
+                )
+            ) { raftState ->
+                verifyTransition(
+                    raftState,
+                    RaftEvent.RequestVoteRPC(
+                        candidateTerm = 2,
+                        candidateId = OTHER_RAFT_ID,
+                        lastLogIndex = 0,
+                        lastLogTerm = 0
+                    ),
+                    RaftState.Follower(
+                        State(THIS_RAFT_ID, currentTerm = 2, votedFor = OTHER_RAFT_ID)
+                    ),
+                    RaftSideEffect.RequestVoteRPCResponse(clientTerm = 2, true)
+                )
             }
         }
 
