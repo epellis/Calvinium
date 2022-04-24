@@ -203,4 +203,55 @@ class RaftSuite :
                 )
             transition.sideEffect shouldBe null
         }
+
+        test("Append entries fails if leader index is lower than follower") {
+            val stateMachine =
+                buildArbitraryRaftStateMachine(
+                    RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 2))
+                )
+            val transition =
+                stateMachine.transition(
+                    RaftEvent.AppendEntriesRPC(
+                        leaderTerm = 2,
+                        leaderId = OTHER_RAFT_ID,
+                        prevLogIndex = -1,
+                        prevLogTerm = 0,
+                        leaderCommitIndex = -1
+                    )
+                ) as
+                    StateMachine.Transition.Valid<*, *, *>
+            stateMachine.state shouldBe RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 2))
+            transition.sideEffect shouldBe
+                RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = false)
+        }
+
+        test("Append entries fails if prev log index has incorrect term") {
+            val stateMachine =
+                buildArbitraryRaftStateMachine(
+                    RaftState.Follower(
+                        State(
+                            THIS_RAFT_ID,
+                            currentTerm = 2,
+                            log = ImmutableList.of(LogEntry(2, null))
+                        )
+                    )
+                )
+            val transition =
+                stateMachine.transition(
+                    RaftEvent.AppendEntriesRPC(
+                        leaderTerm = 2,
+                        leaderId = OTHER_RAFT_ID,
+                        prevLogIndex = 0,
+                        prevLogTerm = 2,
+                        leaderCommitIndex = 0
+                    )
+                ) as
+                    StateMachine.Transition.Valid<*, *, *>
+            stateMachine.state shouldBe
+                RaftState.Follower(
+                    State(THIS_RAFT_ID, currentTerm = 2, log = ImmutableList.of(LogEntry(2, null)))
+                )
+            transition.sideEffect shouldBe
+                RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = false)
+        }
     })

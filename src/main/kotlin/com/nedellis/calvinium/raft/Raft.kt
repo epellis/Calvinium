@@ -7,7 +7,7 @@ import kotlin.math.max
 import kotlin.math.min
 import mu.KotlinLogging
 
-data class LogEntry(val term: Int, val command: Any)
+data class LogEntry(val term: Int, val command: Any?)
 
 data class State(
     val id: UUID,
@@ -177,8 +177,8 @@ sealed interface RaftEvent {
         val leaderId: UUID,
         val prevLogIndex: Int,
         val prevLogTerm: Int,
+        val leaderCommitIndex: Int,
         val entries: ImmutableList<LogEntry> = ImmutableList.of(),
-        val leaderCommitIndex: Int
     ) : RaftEvent
     data class RequestVoteRPC(
         val candidateTerm: Int,
@@ -190,13 +190,12 @@ sealed interface RaftEvent {
     data class RequestVoteRPCResponse(val r: RaftSideEffect.RequestVoteRPCResponse) : RaftEvent
 }
 
-sealed class RaftSideEffect {
-    data class StartRequestVoteRPCRequest(val currentState: State) : RaftSideEffect()
-    data class StartAppendEntriesRPCRequest(val currentState: State) : RaftSideEffect()
-    data class AppendEntriesRPCResponse(val clientTerm: Int, val success: Boolean) :
-        RaftSideEffect()
+sealed interface RaftSideEffect {
+    data class StartRequestVoteRPCRequest(val currentState: State) : RaftSideEffect
+    data class StartAppendEntriesRPCRequest(val currentState: State) : RaftSideEffect
+    data class AppendEntriesRPCResponse(val clientTerm: Int, val success: Boolean) : RaftSideEffect
     data class RequestVoteRPCResponse(val clientTerm: Int, val voteGranted: Boolean) :
-        RaftSideEffect()
+        RaftSideEffect
 }
 
 fun buildRaftStateMachine(id: UUID): StateMachine<RaftState, RaftEvent, RaftSideEffect> {
