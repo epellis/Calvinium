@@ -103,79 +103,102 @@ class RaftSuite :
         }
 
         test("Follower becomes candidate on timeout") {
-            val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
-            val stateMachine = buildArbitraryRaftStateMachine(RaftState.Follower(State(id)))
+            val stateMachine =
+                buildArbitraryRaftStateMachine(RaftState.Follower(State(THIS_RAFT_ID)))
             val transition =
                 stateMachine.transition(RaftEvent.FollowerTimeOut) as
                     StateMachine.Transition.Valid<*, *, *>
             stateMachine.state shouldBe
-                RaftState.Candidate(State(id = id, currentTerm = 1, votedFor = id))
+                RaftState.Candidate(
+                    State(id = THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)
+                )
             transition.sideEffect shouldBe
                 RaftSideEffect.StartRequestVoteRPCRequest(
-                    State(id = id, currentTerm = 1, votedFor = id)
+                    State(id = THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)
                 )
         }
 
         test("Candidate becomes candidate on timeout") {
-            val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
             val stateMachine =
                 buildArbitraryRaftStateMachine(
-                    RaftState.Candidate(State(id, currentTerm = 1, votedFor = id))
+                    RaftState.Candidate(
+                        State(THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)
+                    )
                 )
             val transition =
                 stateMachine.transition(RaftEvent.CandidateElectionTimeOut) as
                     StateMachine.Transition.Valid<*, *, *>
             stateMachine.state shouldBe
-                RaftState.Candidate(State(id = id, currentTerm = 2, votedFor = id))
+                RaftState.Candidate(
+                    State(id = THIS_RAFT_ID, currentTerm = 2, votedFor = THIS_RAFT_ID)
+                )
             transition.sideEffect shouldBe
                 RaftSideEffect.StartRequestVoteRPCRequest(
-                    State(id = id, currentTerm = 2, votedFor = id)
+                    State(id = THIS_RAFT_ID, currentTerm = 2, votedFor = THIS_RAFT_ID)
                 )
         }
 
         test("Candidate becomes leader on election win") {
-            val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
             val stateMachine =
                 buildArbitraryRaftStateMachine(
-                    RaftState.Candidate(State(id, currentTerm = 1, votedFor = id))
+                    RaftState.Candidate(
+                        State(THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)
+                    )
                 )
             val transition =
                 stateMachine.transition(RaftEvent.CandidateMajorityVotesReceived) as
                     StateMachine.Transition.Valid<*, *, *>
             stateMachine.state shouldBe
-                RaftState.Leader(State(id = id, currentTerm = 1, votedFor = id), LeaderState())
+                RaftState.Leader(
+                    State(id = THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID),
+                    LeaderState()
+                )
             transition.sideEffect shouldBe
                 RaftSideEffect.StartAppendEntriesRPCRequest(
-                    State(id = id, currentTerm = 1, votedFor = id)
+                    State(id = THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)
                 )
         }
 
-        //        test("Candidate becomes follower on leader discovery") {
-        //            val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
-        //            val stateMachine =
-        //                buildArbitraryRaftStateMachine(
-        //                    RaftState.Candidate(State(id, currentTerm = 1, votedFor = id))
-        //                )
-        //            val transition =
-        //                stateMachine.transition(RaftEvent.DiscoverHigherTerm(2)) as
-        //                    StateMachine.Transition.Valid<*, *, *>
-        //            stateMachine.state shouldBe
-        //                RaftState.Follower(State(id = id, currentTerm = 2, votedFor = null))
-        //            transition.sideEffect shouldBe null
-        //        }
-        //
-        //        test("Leader becomes follower on higher term discovery") {
-        //            val id = UUID.nameUUIDFromBytes(byteArrayOf(0, 0))
-        //            val stateMachine =
-        //                buildArbitraryRaftStateMachine(
-        //                    RaftState.Leader(State(id, currentTerm = 1, votedFor = id),
-        // LeaderState())
-        //                )
-        //            val transition =
-        //                stateMachine.transition(RaftEvent.DiscoverHigherTerm(2)) as
-        //                    StateMachine.Transition.Valid<*, *, *>
-        //            stateMachine.state shouldBe
-        //                RaftState.Follower(State(id = id, currentTerm = 2, votedFor = null))
-        //            transition.sideEffect shouldBe null
-        //        }
+        test("Candidate converts to follower if response is of higher term") {
+            val stateMachine =
+                buildArbitraryRaftStateMachine(
+                    RaftState.Candidate(
+                        State(THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)
+                    )
+                )
+            val transition =
+                stateMachine.transition(
+                    RaftEvent.RequestVoteRPCResponse(
+                        RaftSideEffect.RequestVoteRPCResponse(clientTerm = 2, voteGranted = false)
+                    )
+                ) as
+                    StateMachine.Transition.Valid<*, *, *>
+            stateMachine.state shouldBe
+                RaftState.Follower(
+                    State(id = THIS_RAFT_ID, currentTerm = 2),
+                )
+            transition.sideEffect shouldBe null
+        }
+
+        test("Leader converts to follower if response is of higher term") {
+            val stateMachine =
+                    buildArbitraryRaftStateMachine(
+                            RaftState.Leader(
+                                    State(THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID),
+                                    LeaderState()
+                            )
+                    )
+            val transition =
+                    stateMachine.transition(
+                            RaftEvent.AppendEntriesRPCResponse(
+                                    RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = false)
+                            )
+                    ) as
+                            StateMachine.Transition.Valid<*, *, *>
+            stateMachine.state shouldBe
+                    RaftState.Follower(
+                            State(id = THIS_RAFT_ID, currentTerm = 2),
+                    )
+            transition.sideEffect shouldBe null
+        }
     })
