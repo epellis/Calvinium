@@ -1,15 +1,19 @@
 package com.nedellis.calvinium.raft
 
+import com.google.common.collect.ImmutableList
 import com.tinder.StateMachine
 import java.util.UUID
 import kotlin.math.max
+import kotlin.math.min
 import mu.KotlinLogging
+
+data class LogEntry(val term: Int, val command: Any)
 
 data class State(
     val id: UUID,
     val currentTerm: Int = 0,
     val votedFor: UUID? = null,
-    val log: List<Any> = listOf(),
+    val log: ImmutableList<LogEntry> = ImmutableList.of(),
     val commitIndex: Int = 0,
     val lastApplied: Int = 0,
 ) {
@@ -22,6 +26,61 @@ data class State(
     fun updateLastApplied(leaderCommitIndex: Int): State {
         // TODO: Apply log[lastApplied] to State Machine if leaderCommitIndex > lastApplied
         return this.copy(lastApplied = max(lastApplied, leaderCommitIndex))
+    }
+
+    /** Returns if the operation will result in success */
+    fun validateAppendEntries(rpc: RaftEvent.AppendEntriesRPC): Boolean {
+        if (rpc.leaderTerm < currentTerm) {
+            return false
+        }
+        if (log[rpc.prevLogIndex].term != rpc.prevLogTerm) {
+            return false
+        }
+        return true
+    }
+
+    fun appendEntries(rpc: RaftEvent.AppendEntriesRPC): State {
+        assert(validateAppendEntries(rpc))
+
+        val listBuilder = ImmutableList.Builder<LogEntry>()
+        listBuilder.addAll(log.subList(0, rpc.prevLogIndex + 1))
+
+        val firstConflictingEntryIndex =
+            findFirstConflictingEntryIndex(rpc.prevLogIndex, rpc.entries)
+
+        val truncatedLog =
+            if (firstConflictingEntryIndex == null) {
+                log
+            } else {
+                log.subList(0, firstConflictingEntryIndex + rpc.prevLogIndex + 1)
+            }
+
+        val newLog =
+            ImmutableList.Builder<LogEntry>()
+                .addAll(truncatedLog)
+                .addAll(rpc.entries.subList(firstConflictingEntryIndex ?: 0, rpc.entries.size))
+                .build()
+
+        val newCommitIndex =
+            if (rpc.leaderCommitIndex > commitIndex) {
+                min(rpc.leaderCommitIndex, newLog.size - 1)
+            } else {
+                commitIndex
+            }
+
+        return this.copy(log = newLog, commitIndex = newCommitIndex)
+    }
+
+    private fun findFirstConflictingEntryIndex(
+        prevLogIndex: Int,
+        entries: ImmutableList<LogEntry>
+    ): Int? {
+        for (i in 0 until entries.size) {
+            if (log[i + prevLogIndex + 1].term != entries[i].term) {
+                return i
+            }
+        }
+        return null
     }
 
     fun wasVoteGranted(candidateId: UUID, candidateTerm: Int): Boolean {
@@ -104,7 +163,8 @@ sealed interface RaftEvent {
         val leaderTerm: Int,
         val leaderId: UUID,
         val prevLogIndex: Int,
-        val entries: List<Any>,
+        val prevLogTerm: Int,
+        val entries: ImmutableList<LogEntry> = ImmutableList.of(),
         val leaderCommitIndex: Int
     ) : RaftEvent
     data class RequestVoteRPC(
@@ -146,7 +206,8 @@ internal fun buildArbitraryRaftStateMachine(
                     transitionTo(updatedState, sideEffect)
                 } else {
                     transitionTo(
-                        RaftState.Follower(this.state.updateLastApplied(it.leaderCommitIndex))
+                        RaftState.Follower(this.state.updateLastApplied(it.leaderCommitIndex)),
+                        RaftSideEffect.AppendEntriesRPCResponse(this.state.currentTerm, true)
                     )
                 }
             }

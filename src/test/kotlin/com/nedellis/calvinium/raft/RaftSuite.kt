@@ -1,5 +1,6 @@
 package com.nedellis.calvinium.raft
 
+import com.google.common.collect.ImmutableList
 import com.tinder.StateMachine
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withData
@@ -53,7 +54,8 @@ class RaftSuite :
                         leaderTerm = 2,
                         leaderId = OTHER_RAFT_ID,
                         prevLogIndex = 0,
-                        entries = listOf(),
+                        prevLogTerm = 0,
+                        entries = ImmutableList.of(),
                         leaderCommitIndex = 0
                     ),
                     RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 2)),
