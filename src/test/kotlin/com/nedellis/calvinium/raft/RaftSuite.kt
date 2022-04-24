@@ -53,7 +53,7 @@ class RaftSuite :
                     RaftEvent.AppendEntriesRPC(
                         leaderTerm = 2,
                         leaderId = OTHER_RAFT_ID,
-                        prevLogIndex = 0,
+                        prevLogIndex = -1,
                         prevLogTerm = 0,
                         entries = ImmutableList.of(),
                         leaderCommitIndex = 0

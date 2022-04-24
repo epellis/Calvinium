@@ -17,30 +17,35 @@ data class State(
     val commitIndex: Int = 0,
     val lastApplied: Int = 0,
 ) {
+    private val logger = KotlinLogging.logger {}
     fun startElection(): State {
         return this.copy(currentTerm = currentTerm + 1, votedFor = id)
     }
     fun updateToLatestTerm(otherTerm: Int): State {
         return this.copy(currentTerm = max(currentTerm, otherTerm), votedFor = null)
     }
-    fun updateLastApplied(leaderCommitIndex: Int): State {
-        // TODO: Apply log[lastApplied] to State Machine if leaderCommitIndex > lastApplied
-        return this.copy(lastApplied = max(lastApplied, leaderCommitIndex))
-    }
 
-    /** Returns if the operation will result in success */
-    fun validateAppendEntries(rpc: RaftEvent.AppendEntriesRPC): Boolean {
+    fun isAppendEntriesValid(rpc: RaftEvent.AppendEntriesRPC): Boolean {
         if (rpc.leaderTerm < currentTerm) {
+            logger.debug {
+                "Append Entries $rpc invalid because Current Term $currentTerm > Leader Term ${rpc.leaderTerm}"
+            }
             return false
         }
-        if (log[rpc.prevLogIndex].term != rpc.prevLogTerm) {
+        if (rpc.prevLogIndex != -1 &&
+                log.size > rpc.prevLogIndex &&
+                log[rpc.prevLogIndex].term != rpc.prevLogTerm
+        ) {
+            logger.debug {
+                "Append Entries $rpc invalid because my log ${log[rpc.prevLogIndex].term} != leader log ${rpc.prevLogTerm}"
+            }
             return false
         }
         return true
     }
 
     fun appendEntries(rpc: RaftEvent.AppendEntriesRPC): State {
-        assert(validateAppendEntries(rpc))
+        assert(isAppendEntriesValid(rpc))
 
         val listBuilder = ImmutableList.Builder<LogEntry>()
         listBuilder.addAll(log.subList(0, rpc.prevLogIndex + 1))
@@ -67,6 +72,8 @@ data class State(
             } else {
                 commitIndex
             }
+
+        // TODO: Update lastApplied
 
         return this.copy(log = newLog, commitIndex = newCommitIndex)
     }
@@ -139,15 +146,21 @@ sealed interface RaftState {
     }
 
     fun appendEntriesAndUpdateToLatestTerm(
-        leaderTerm: Int,
-        leaderCommitIndex: Int
+        rpc: RaftEvent.AppendEntriesRPC
     ): Pair<RaftState, RaftSideEffect.AppendEntriesRPCResponse> {
-        val updatedState =
-            this.state.updateToLatestTerm(leaderTerm).updateLastApplied(leaderCommitIndex)
-        return Pair(
-            Follower(updatedState),
-            RaftSideEffect.AppendEntriesRPCResponse(updatedState.currentTerm, true)
-        )
+        return if (this.state.isAppendEntriesValid(rpc)) {
+            val updatedState = this.state.updateToLatestTerm(rpc.leaderTerm).appendEntries(rpc)
+            Pair(
+                Follower(updatedState),
+                RaftSideEffect.AppendEntriesRPCResponse(updatedState.currentTerm, true)
+            )
+        } else {
+            val updatedState = this.state.updateToLatestTerm(rpc.leaderTerm)
+            Pair(
+                Follower(updatedState),
+                RaftSideEffect.AppendEntriesRPCResponse(updatedState.currentTerm, false)
+            )
+        }
     }
 
     fun convertToFollower(latestTerm: Int): RaftState {
@@ -201,14 +214,20 @@ internal fun buildArbitraryRaftStateMachine(
         state<RaftState.Follower> {
             on<RaftEvent.AppendEntriesRPC> {
                 if (it.leaderTerm > this.state.currentTerm) {
-                    val (updatedState, sideEffect) =
-                        this.appendEntriesAndUpdateToLatestTerm(it.leaderTerm, it.leaderCommitIndex)
+                    val (updatedState, sideEffect) = this.appendEntriesAndUpdateToLatestTerm(it)
                     transitionTo(updatedState, sideEffect)
                 } else {
-                    transitionTo(
-                        RaftState.Follower(this.state.updateLastApplied(it.leaderCommitIndex)),
-                        RaftSideEffect.AppendEntriesRPCResponse(this.state.currentTerm, true)
-                    )
+                    if (this.state.isAppendEntriesValid(it)) {
+                        transitionTo(
+                            this.withState(this.state.appendEntries(it)),
+                            RaftSideEffect.AppendEntriesRPCResponse(this.state.currentTerm, false)
+                        )
+                    } else {
+                        transitionTo(
+                            this,
+                            RaftSideEffect.AppendEntriesRPCResponse(this.state.currentTerm, false)
+                        )
+                    }
                 }
             }
 
@@ -240,12 +259,12 @@ internal fun buildArbitraryRaftStateMachine(
         state<RaftState.Candidate> {
             on<RaftEvent.AppendEntriesRPC> {
                 if (it.leaderTerm >= this.state.currentTerm) {
-                    val (updatedState, sideEffect) =
-                        this.appendEntriesAndUpdateToLatestTerm(it.leaderTerm, it.leaderCommitIndex)
+                    val (updatedState, sideEffect) = this.appendEntriesAndUpdateToLatestTerm(it)
                     transitionTo(updatedState, sideEffect)
                 } else {
                     transitionTo(
-                        RaftState.Candidate(this.state.updateLastApplied(it.leaderCommitIndex))
+                        this,
+                        RaftSideEffect.AppendEntriesRPCResponse(this.state.currentTerm, false)
                     )
                 }
             }
@@ -293,11 +312,13 @@ internal fun buildArbitraryRaftStateMachine(
         state<RaftState.Leader> {
             on<RaftEvent.AppendEntriesRPC> {
                 if (it.leaderTerm >= this.state.currentTerm) {
-                    val (updatedState, sideEffect) =
-                        this.appendEntriesAndUpdateToLatestTerm(it.leaderTerm, it.leaderCommitIndex)
+                    val (updatedState, sideEffect) = this.appendEntriesAndUpdateToLatestTerm(it)
                     transitionTo(updatedState, sideEffect)
                 } else {
-                    transitionTo(RaftState.Leader(this.state, this.leaderState))
+                    transitionTo(
+                        this,
+                        RaftSideEffect.AppendEntriesRPCResponse(this.state.currentTerm, false)
+                    )
                 }
             }
 
