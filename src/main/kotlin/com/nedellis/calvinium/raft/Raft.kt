@@ -1,7 +1,6 @@
 package com.nedellis.calvinium.raft
 
 import com.google.common.collect.ImmutableList
-import com.google.common.collect.ImmutableMap
 import com.tinder.StateMachine
 import java.util.UUID
 import kotlin.math.max
@@ -118,28 +117,27 @@ data class State(
 
 data class LeaderState(
     // Index of the next entry the follower will send to each leader
-    val nextIndex: ImmutableMap<UUID, Int> = ImmutableMap.of(),
-
-    //
-    val matchIndex: ImmutableMap<UUID, Int> = ImmutableMap.of()
+    val nextIndex: Map<UUID, Int> = mapOf(),
+    val matchIndex: Map<UUID, Int> = mapOf()
 ) {
     fun updateNextIndex(id: UUID, newNextIndex: Int): LeaderState {
         return this.copy(
-            nextIndex =
-                ImmutableMap.builder<UUID, Int>()
-                    .putAll(this.nextIndex)
-                    .put(id, newNextIndex)
-                    .build()
-        )
+            nextIndex = this.nextIndex.plus(Pair(id, newNextIndex))
+            //                ImmutableMap.builder<UUID, Int>()
+            //                    .putAll(this.nextIndex.filterKeys { it != id })
+            //                    .put(id, newNextIndex)
+            //                    .build()
+            )
     }
+
     fun updateMatchIndex(id: UUID, newMatchIndex: Int): LeaderState {
         return this.copy(
-            matchIndex =
-                ImmutableMap.builder<UUID, Int>()
-                    .putAll(this.matchIndex)
-                    .put(id, newMatchIndex)
-                    .build()
-        )
+            matchIndex = this.matchIndex.plus(Pair(id, newMatchIndex))
+            //                ImmutableMap.builder<UUID, Int>()
+            //                    .putAll(this.nextIndex.filterKeys { it != id })
+            //                    .put(id, newMatchIndex)
+            //                    .build()
+            )
     }
 }
 
@@ -168,11 +166,7 @@ sealed interface RaftState {
             //
             val matchIndex = allServerIds.associateWith { 0 }
 
-            val leaderState =
-                LeaderState(
-                    ImmutableMap.ofEntries(*nextIndex.entries.toTypedArray()),
-                    ImmutableMap.ofEntries(*matchIndex.entries.toTypedArray())
-                )
+            val leaderState = LeaderState(nextIndex, matchIndex)
 
             return Leader(state, leaderState)
         }

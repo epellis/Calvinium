@@ -133,10 +133,13 @@ class RaftSuite :
         test("Candidate becomes leader on election win") {
             verifyTransition(
                 RaftState.Candidate(State(THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)),
-                RaftEvent.CandidateMajorityVotesReceived(listOf()),
+                RaftEvent.CandidateMajorityVotesReceived(listOf(THIS_RAFT_ID, OTHER_RAFT_ID)),
                 RaftState.Leader(
                     State(id = THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID),
-                    LeaderState()
+                    LeaderState(
+                        nextIndex = mapOf(THIS_RAFT_ID to 1, OTHER_RAFT_ID to 1),
+                        matchIndex = mapOf(THIS_RAFT_ID to 0, OTHER_RAFT_ID to 0)
+                    )
                 ),
                 RaftSideEffect.StartAppendEntriesRPCRequest(
                     State(id = THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)
@@ -338,6 +341,35 @@ class RaftSuite :
                     )
                 ),
                 RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = true)
+            )
+        }
+
+        test("Append Entries successful response updates entries in leader state") {
+            verifyTransition(
+                RaftState.Leader(
+                    State(THIS_RAFT_ID, currentTerm = 1, log = ImmutableList.of(LogEntry(1, null))),
+                    LeaderState(
+                        nextIndex = mapOf(THIS_RAFT_ID to 1, OTHER_RAFT_ID to 1),
+                        matchIndex = mapOf(THIS_RAFT_ID to 0, OTHER_RAFT_ID to 0)
+                    )
+                ),
+                RaftEvent.AppendEntriesRPCResponse(
+                    OTHER_RAFT_ID,
+                    RaftEvent.AppendEntriesRPC(
+                        leaderTerm = 1,
+                        leaderId = THIS_RAFT_ID,
+                        entries = ImmutableList.of(LogEntry(1, null))
+                    ),
+                    RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 1, success = true)
+                ),
+                RaftState.Leader(
+                    State(THIS_RAFT_ID, currentTerm = 1, log = ImmutableList.of(LogEntry(1, null))),
+                    LeaderState(
+                        nextIndex = mapOf(THIS_RAFT_ID to 1, OTHER_RAFT_ID to 2),
+                        matchIndex = mapOf(THIS_RAFT_ID to 0, OTHER_RAFT_ID to 1)
+                    )
+                ),
+                null
             )
         }
     })
