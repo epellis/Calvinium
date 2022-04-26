@@ -121,23 +121,11 @@ data class LeaderState(
     val matchIndex: Map<UUID, Int> = mapOf()
 ) {
     fun updateNextIndex(id: UUID, newNextIndex: Int): LeaderState {
-        return this.copy(
-            nextIndex = this.nextIndex.plus(Pair(id, newNextIndex))
-            //                ImmutableMap.builder<UUID, Int>()
-            //                    .putAll(this.nextIndex.filterKeys { it != id })
-            //                    .put(id, newNextIndex)
-            //                    .build()
-            )
+        return this.copy(nextIndex = this.nextIndex.plus(Pair(id, newNextIndex)))
     }
 
     fun updateMatchIndex(id: UUID, newMatchIndex: Int): LeaderState {
-        return this.copy(
-            matchIndex = this.matchIndex.plus(Pair(id, newMatchIndex))
-            //                ImmutableMap.builder<UUID, Int>()
-            //                    .putAll(this.nextIndex.filterKeys { it != id })
-            //                    .put(id, newMatchIndex)
-            //                    .build()
-            )
+        return this.copy(matchIndex = this.matchIndex.plus(Pair(id, newMatchIndex)))
     }
 }
 

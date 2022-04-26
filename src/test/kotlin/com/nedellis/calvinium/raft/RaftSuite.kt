@@ -372,4 +372,40 @@ class RaftSuite :
                 null
             )
         }
+
+        test("Append Entries failed response walks back next index") {
+            verifyTransition(
+                RaftState.Leader(
+                    State(THIS_RAFT_ID, currentTerm = 1, log = ImmutableList.of(LogEntry(1, null))),
+                    LeaderState(
+                        nextIndex = mapOf(THIS_RAFT_ID to 1, OTHER_RAFT_ID to 1),
+                        matchIndex = mapOf(THIS_RAFT_ID to 0, OTHER_RAFT_ID to 0)
+                    )
+                ),
+                RaftEvent.AppendEntriesRPCResponse(
+                    OTHER_RAFT_ID,
+                    RaftEvent.AppendEntriesRPC(
+                        leaderTerm = 1,
+                        leaderId = THIS_RAFT_ID,
+                        entries = ImmutableList.of(LogEntry(1, null))
+                    ),
+                    RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 1, success = false)
+                ),
+                RaftState.Leader(
+                    State(THIS_RAFT_ID, currentTerm = 1, log = ImmutableList.of(LogEntry(1, null))),
+                    LeaderState(
+                        nextIndex = mapOf(THIS_RAFT_ID to 1, OTHER_RAFT_ID to 0),
+                        matchIndex = mapOf(THIS_RAFT_ID to 0, OTHER_RAFT_ID to 0)
+                    )
+                ),
+                RaftSideEffect.StartAppendEntriesRPCRequest(
+                    currentState =
+                        State(
+                            THIS_RAFT_ID,
+                            currentTerm = 1,
+                            log = ImmutableList.of(LogEntry(1, null))
+                        ),
+                )
+            )
+        }
     })
