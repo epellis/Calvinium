@@ -133,7 +133,7 @@ class RaftSuite :
         test("Candidate becomes leader on election win") {
             verifyTransition(
                 RaftState.Candidate(State(THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)),
-                RaftEvent.CandidateMajorityVotesReceived,
+                RaftEvent.CandidateMajorityVotesReceived(listOf()),
                 RaftState.Leader(
                     State(id = THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID),
                     LeaderState()
@@ -164,6 +164,8 @@ class RaftSuite :
                     LeaderState()
                 ),
                 RaftEvent.AppendEntriesRPCResponse(
+                    OTHER_RAFT_ID,
+                    RaftEvent.AppendEntriesRPC(leaderTerm = 1, leaderId = THIS_RAFT_ID),
                     RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = false)
                 ),
                 RaftState.Follower(

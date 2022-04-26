@@ -6,6 +6,24 @@ option java_outer_classname = "CalviniumProto";
 
 package calvinium;
 
-message Foo {
-  string bar = 1;
+message LogEntry {
+  int32 term = 1;
+}
+
+message AppendEntriesRequest {
+  int32 leader_term = 1;
+  string leader_id = 2;
+  int32 prev_log_index = 3;
+  int32 prev_log_term = 4;
+  int32 leader_commit_index = 5;
+  repeated LogEntry entries = 6;
+}
+
+message AppendEntriesResponse {
+  int32 client_term = 1;
+  bool success = 2;
+}
+
+service Raft {
+  rpc AppendEntries (AppendEntriesRequest) returns (AppendEntriesResponse) {}
 }

@@ -32,14 +32,12 @@ tasks.withType<KotlinCompile> {
 }
 
 sourceSets{
-//    create("calvinium"){
-//        proto {
-//            srcDir("src/proto")
-//        }
-//    }
     main {
         java {
             srcDir("build/generated/source/proto/main/java")
+            srcDir("build/generated/source/proto/main/kotlin")
+            srcDir("build/generated/source/proto/main/grpc")
+            srcDir("build/generated/source/proto/main/grpckt")
         }
     }
 }
@@ -61,9 +59,12 @@ dependencies {
     implementation("com.tinder.statemachine:statemachine:0.2.0")
     implementation("io.trino:trino-parser:377")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.6.1")
+
     runtimeOnly("io.grpc:grpc-netty-shaded:1.45.1")
     implementation("io.grpc:grpc-protobuf:1.45.1")
     implementation("io.grpc:grpc-stub:1.45.1")
+    implementation("io.grpc:grpc-kotlin-stub:1.2.1")
+    implementation("com.google.protobuf:protobuf-kotlin:3.20.1")
     compileOnly("org.apache.tomcat:annotations-api:6.0.53") // necessary for Java 9+
 
     testImplementation(kotlin("test"))
@@ -95,12 +96,19 @@ protobuf {
         id("grpc") {
             artifact = "io.grpc:protoc-gen-grpc-java:1.45.1"
         }
+        id("grpckt") {
+            artifact = "io.grpc:protoc-gen-grpc-kotlin:1.2.1:jdk7@jar"
+        }
     }
     generateProtoTasks {
         ofSourceSet("main").forEach {
             it.plugins {
                 // Apply the "grpc" plugin whose spec is defined above, without options.
                 id("grpc")
+                id("grpckt")
+            }
+            it.builtins {
+                id("kotlin")
             }
         }
     }
