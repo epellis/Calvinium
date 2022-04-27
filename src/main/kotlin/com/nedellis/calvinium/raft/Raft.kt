@@ -7,21 +7,32 @@ import kotlin.math.max
 import kotlin.math.min
 import mu.KotlinLogging
 
-data class LogEntry(val term: Int, val command: Any?)
+data class LogEntry(val term: Int, val command: Any? = null)
 
 data class State(
     val id: UUID,
     val currentTerm: Int = 0,
     val votedFor: UUID? = null,
-    val log: ImmutableList<LogEntry> = ImmutableList.of(),
-    val commitIndex: Int = -1, // TODO: See raft pdf, everything is 1 based
-    val lastApplied: Int = -1, // TODO: See raft pdf, everything is 1 based
+    val log: ImmutableList<LogEntry> = ImmutableList.of(LogEntry(term = 0)),
+    val commitIndex: Int = 0,
+    val lastApplied: Int = 0,
 ) {
-    // TODO: Add verification/assertion that lastApplied <= commitIndex?
+    init {
+        assert(lastApplied <= commitIndex)
+    }
+
     private val logger = KotlinLogging.logger {}
 
-    fun startElection(): State {
-        return this.copy(currentTerm = currentTerm + 1, votedFor = id)
+    fun startElection(): Pair<State, RaftEvent.RequestVoteRPC> {
+        val updatedState = this.copy(currentTerm = currentTerm + 1, votedFor = id)
+        return Pair(
+            updatedState,
+            RaftEvent.RequestVoteRPC(
+                updatedState.currentTerm,
+                updatedState.id,
+                updatedState.log.last().term
+            )
+        )
     }
 
     fun updateToLatestTerm(otherTerm: Int): State {
@@ -36,19 +47,17 @@ data class State(
             return false
         }
 
-        if (rpc.prevLogIndex >= 0) {
-            val entryAtPrevLogIndex = log.getOrNull(rpc.prevLogIndex)
-            if (entryAtPrevLogIndex == null) {
-                logger.debug {
-                    "Append Entries $rpc invalid because my log has no entry at ${rpc.prevLogIndex}"
-                }
-                return false
-            } else if (entryAtPrevLogIndex.term != rpc.prevLogTerm) {
-                logger.debug {
-                    "Append Entries $rpc invalid because my log ${entryAtPrevLogIndex.term} != leader log ${rpc.prevLogTerm}"
-                }
-                return false
+        val entryAtPrevLogIndex = log.getOrNull(rpc.prevLogIndex)
+        if (entryAtPrevLogIndex == null) {
+            logger.debug {
+                "Append Entries $rpc invalid because my log has no entry at ${rpc.prevLogIndex}"
             }
+            return false
+        } else if (entryAtPrevLogIndex.term != rpc.prevLogTerm) {
+            logger.debug {
+                "Append Entries $rpc invalid because my log term=${entryAtPrevLogIndex.term} != leader log term=${rpc.prevLogTerm}"
+            }
+            return false
         }
 
         return true
@@ -146,7 +155,7 @@ sealed interface RaftState {
             return this.copy(state = newState)
         }
 
-        fun convertToLeader(allServerIds: List<UUID>): Leader {
+        fun convertToLeader(allServerIds: List<UUID>): Pair<Leader, RaftEvent.AppendEntriesRPC> {
             // initializes all nextIndex values to the index just after the
             // last one in its log
             val nextIndex = allServerIds.associateWith { 1 }
@@ -156,7 +165,17 @@ sealed interface RaftState {
 
             val leaderState = LeaderState(nextIndex, matchIndex)
 
-            return Leader(state, leaderState)
+            return Pair(
+                Leader(state, leaderState),
+                RaftEvent.AppendEntriesRPC(
+                    leaderId = state.id,
+                    leaderTerm = state.currentTerm,
+                    prevLogIndex = state.log.size - 1,
+                    prevLogTerm = state.log.last().term,
+                    leaderCommitIndex = state.commitIndex,
+                    entries = ImmutableList.of()
+                )
+            )
         }
     }
 
@@ -191,9 +210,12 @@ sealed interface RaftState {
 
             val updatedState =
                 this.copy(leaderState = leaderState.updateNextIndex(rpc.id, newNextIndex))
+
             return Pair(
                 updatedState,
-                RaftSideEffect.StartAppendEntriesRPCRequest(updatedState.state)
+                RaftSideEffect.StartAppendEntriesRPCRequest(
+                    mapOf(rpc.id to rpc.req.copy(prevLogIndex = newNextIndex - 1))
+                )
             )
         }
     }
@@ -237,22 +259,22 @@ sealed interface RaftState {
 }
 
 sealed interface RaftEvent {
-    object FollowerTimeOut : RaftEvent
-    object CandidateElectionTimeOut : RaftEvent
+    data class FollowerTimeOut(val allServerIds: List<UUID>) : RaftEvent
+    data class CandidateElectionTimeOut(val allServerIds: List<UUID>) : RaftEvent
     data class CandidateMajorityVotesReceived(val allServerIds: List<UUID>) : RaftEvent
     data class AppendEntriesRPC(
         val leaderTerm: Int,
         val leaderId: UUID,
-        val prevLogIndex: Int = -1,
-        val prevLogTerm: Int = -1,
-        val leaderCommitIndex: Int = -1,
+        val prevLogIndex: Int = 0,
+        val prevLogTerm: Int = 0,
+        val leaderCommitIndex: Int = 0,
         val entries: ImmutableList<LogEntry> = ImmutableList.of(),
     ) : RaftEvent
     data class RequestVoteRPC(
         val candidateTerm: Int,
         val candidateId: UUID,
-        val lastLogIndex: Int = -1,
-        val lastLogTerm: Int = -1
+        val lastLogIndex: Int = 0,
+        val lastLogTerm: Int = 0
     ) : RaftEvent
     data class AppendEntriesRPCResponse(
         val id: UUID,
@@ -263,9 +285,10 @@ sealed interface RaftEvent {
 }
 
 sealed interface RaftSideEffect {
-    data class StartRequestVoteRPCRequest(val currentState: State) : RaftSideEffect
-    // TODO: Constrain input type to just leader state
-    data class StartAppendEntriesRPCRequest(val currentState: State) : RaftSideEffect
+    data class StartRequestVoteRPCRequest(val requests: Map<UUID, RaftEvent.RequestVoteRPC>) :
+        RaftSideEffect
+    data class StartAppendEntriesRPCRequest(val requests: Map<UUID, RaftEvent.AppendEntriesRPC>) :
+        RaftSideEffect
     data class AppendEntriesRPCResponse(val clientTerm: Int, val success: Boolean) : RaftSideEffect
     data class RequestVoteRPCResponse(val clientTerm: Int, val voteGranted: Boolean) :
         RaftSideEffect
@@ -321,9 +344,10 @@ internal fun buildArbitraryRaftStateMachine(
             }
 
             on<RaftEvent.FollowerTimeOut> {
+                val (updatedState, rpc) = this.state.startElection()
                 transitionTo(
-                    RaftState.Candidate(this.state.startElection()),
-                    RaftSideEffect.StartRequestVoteRPCRequest(this.state.startElection())
+                    RaftState.Candidate(updatedState),
+                    RaftSideEffect.StartRequestVoteRPCRequest(it.allServerIds.associateWith { rpc })
                 )
             }
         }
@@ -359,17 +383,20 @@ internal fun buildArbitraryRaftStateMachine(
             }
 
             on<RaftEvent.CandidateElectionTimeOut> {
+                val (updatedState, rpc) = this.state.startElection()
                 transitionTo(
-                    RaftState.Candidate(this.state.startElection()),
-                    RaftSideEffect.StartRequestVoteRPCRequest(this.state.startElection())
+                    RaftState.Candidate(updatedState),
+                    RaftSideEffect.StartRequestVoteRPCRequest(it.allServerIds.associateWith { rpc })
                 )
             }
 
             on<RaftEvent.CandidateMajorityVotesReceived> {
-                val updatedState = this.convertToLeader(it.allServerIds)
+                val (updatedState, rpc) = this.convertToLeader(it.allServerIds)
                 transitionTo(
                     updatedState,
-                    RaftSideEffect.StartAppendEntriesRPCRequest(updatedState.state)
+                    RaftSideEffect.StartAppendEntriesRPCRequest(
+                        it.allServerIds.associateWith { rpc }
+                    )
                 )
             }
 

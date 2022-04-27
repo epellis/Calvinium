@@ -53,7 +53,7 @@ class RaftSuite :
                     RaftEvent.AppendEntriesRPC(
                         leaderTerm = 2,
                         leaderId = OTHER_RAFT_ID,
-                        prevLogIndex = -1,
+                        prevLogIndex = 0,
                         prevLogTerm = 0,
                         entries = ImmutableList.of(),
                         leaderCommitIndex = 0
@@ -106,13 +106,16 @@ class RaftSuite :
 
         test("Follower becomes candidate on timeout") {
             verifyTransition(
-                RaftState.Follower(State(THIS_RAFT_ID)),
-                RaftEvent.FollowerTimeOut,
+                RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 0)),
+                RaftEvent.FollowerTimeOut(listOf(THIS_RAFT_ID)),
                 RaftState.Candidate(
                     State(id = THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)
                 ),
                 RaftSideEffect.StartRequestVoteRPCRequest(
-                    State(id = THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)
+                    mapOf(
+                        THIS_RAFT_ID to
+                            RaftEvent.RequestVoteRPC(candidateTerm = 1, candidateId = THIS_RAFT_ID)
+                    )
                 )
             )
         }
@@ -120,12 +123,15 @@ class RaftSuite :
         test("Candidate becomes candidate on timeout") {
             verifyTransition(
                 RaftState.Candidate(State(THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)),
-                RaftEvent.CandidateElectionTimeOut,
+                RaftEvent.CandidateElectionTimeOut(listOf(THIS_RAFT_ID)),
                 RaftState.Candidate(
                     State(id = THIS_RAFT_ID, currentTerm = 2, votedFor = THIS_RAFT_ID)
                 ),
                 RaftSideEffect.StartRequestVoteRPCRequest(
-                    State(id = THIS_RAFT_ID, currentTerm = 2, votedFor = THIS_RAFT_ID)
+                    mapOf(
+                        THIS_RAFT_ID to
+                            RaftEvent.RequestVoteRPC(candidateTerm = 2, candidateId = THIS_RAFT_ID)
+                    )
                 )
             )
         }
@@ -142,7 +148,12 @@ class RaftSuite :
                     )
                 ),
                 RaftSideEffect.StartAppendEntriesRPCRequest(
-                    State(id = THIS_RAFT_ID, currentTerm = 1, votedFor = THIS_RAFT_ID)
+                    mapOf(
+                        THIS_RAFT_ID to
+                            RaftEvent.AppendEntriesRPC(leaderTerm = 1, leaderId = THIS_RAFT_ID),
+                        OTHER_RAFT_ID to
+                            RaftEvent.AppendEntriesRPC(leaderTerm = 1, leaderId = THIS_RAFT_ID)
+                    )
                 )
             )
         }
@@ -184,9 +195,9 @@ class RaftSuite :
                 RaftEvent.AppendEntriesRPC(
                     leaderTerm = 2,
                     leaderId = OTHER_RAFT_ID,
-                    prevLogIndex = 0,
+                    prevLogIndex = 1,
                     prevLogTerm = 0,
-                    leaderCommitIndex = -1
+                    leaderCommitIndex = 0
                 ),
                 RaftState.Follower(State(THIS_RAFT_ID, currentTerm = 2)),
                 RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = false)
@@ -233,57 +244,79 @@ class RaftSuite :
                 RaftEvent.AppendEntriesRPC(
                     leaderTerm = 1,
                     leaderId = OTHER_RAFT_ID,
-                    prevLogIndex = -1,
-                    prevLogTerm = 1,
+                    prevLogIndex = 0,
+                    prevLogTerm = 0,
                     entries = ImmutableList.of(LogEntry(1, null))
                 ),
                 RaftState.Follower(
-                    State(THIS_RAFT_ID, currentTerm = 1, log = ImmutableList.of(LogEntry(1, null)))
+                    State(
+                        THIS_RAFT_ID,
+                        currentTerm = 1,
+                        log = ImmutableList.of(LogEntry(0, null), LogEntry(1, null))
+                    )
                 ),
                 RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 1, success = true)
             )
         }
 
-        test("Append entries succeeds and does rewrite the log 1") {
-            verifyTransition(
-                RaftState.Follower(
-                    State(THIS_RAFT_ID, currentTerm = 2, log = ImmutableList.of(LogEntry(1, null)))
-                ),
-                RaftEvent.AppendEntriesRPC(
-                    leaderTerm = 2,
-                    leaderId = OTHER_RAFT_ID,
-                    prevLogIndex = -1,
-                    prevLogTerm = 1,
-                    entries = ImmutableList.of(LogEntry(2, null))
-                ),
-                RaftState.Follower(
-                    State(THIS_RAFT_ID, currentTerm = 2, log = ImmutableList.of(LogEntry(2, null)))
-                ),
-                RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = true)
-            )
-        }
-
-        test("Append entries succeeds and does rewrite the log 2") {
+        test("Append entries succeeds and rewrites the log 1") {
             verifyTransition(
                 RaftState.Follower(
                     State(
                         THIS_RAFT_ID,
                         currentTerm = 2,
-                        log = ImmutableList.of(LogEntry(1, null), LogEntry(1, null))
+                        log = ImmutableList.of(LogEntry(0, null), LogEntry(1, null))
                     )
                 ),
                 RaftEvent.AppendEntriesRPC(
                     leaderTerm = 2,
                     leaderId = OTHER_RAFT_ID,
-                    prevLogIndex = -1,
-                    prevLogTerm = 1,
+                    prevLogIndex = 0,
+                    prevLogTerm = 0,
+                    entries = ImmutableList.of(LogEntry(2, null))
+                ),
+                RaftState.Follower(
+                    State(
+                        THIS_RAFT_ID,
+                        currentTerm = 2,
+                        log = ImmutableList.of(LogEntry(0, null), LogEntry(2, null))
+                    )
+                ),
+                RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = true)
+            )
+        }
+
+        test("Append entries succeeds and rewrites the log 2") {
+            verifyTransition(
+                RaftState.Follower(
+                    State(
+                        THIS_RAFT_ID,
+                        currentTerm = 2,
+                        log =
+                            ImmutableList.of(
+                                LogEntry(0, null),
+                                LogEntry(1, null),
+                                LogEntry(1, null)
+                            )
+                    )
+                ),
+                RaftEvent.AppendEntriesRPC(
+                    leaderTerm = 2,
+                    leaderId = OTHER_RAFT_ID,
+                    prevLogIndex = 0,
+                    prevLogTerm = 0,
                     entries = ImmutableList.of(LogEntry(1, null), LogEntry(2, null))
                 ),
                 RaftState.Follower(
                     State(
                         THIS_RAFT_ID,
                         currentTerm = 2,
-                        log = ImmutableList.of(LogEntry(1, null), LogEntry(2, null))
+                        log =
+                            ImmutableList.of(
+                                LogEntry(0, null),
+                                LogEntry(1, null),
+                                LogEntry(2, null)
+                            )
                     )
                 ),
                 RaftSideEffect.AppendEntriesRPCResponse(clientTerm = 2, success = true)
@@ -298,7 +331,7 @@ class RaftSuite :
                 RaftEvent.AppendEntriesRPC(
                     leaderTerm = 2,
                     leaderId = OTHER_RAFT_ID,
-                    prevLogIndex = -1,
+                    prevLogIndex = 0,
                     prevLogTerm = 1,
                     leaderCommitIndex = 1,
                     entries = ImmutableList.of()
@@ -315,6 +348,7 @@ class RaftSuite :
             )
         }
 
+        // TODO Make sure this is consistent with the starting state of log
         test("Append Entries updates commit index to index of last entry") {
             verifyTransition(
                 RaftState.Follower(
@@ -327,7 +361,7 @@ class RaftSuite :
                 RaftEvent.AppendEntriesRPC(
                     leaderTerm = 2,
                     leaderId = OTHER_RAFT_ID,
-                    prevLogIndex = -1,
+                    prevLogIndex = 0,
                     prevLogTerm = 1,
                     leaderCommitIndex = 0,
                     entries = ImmutableList.of()
@@ -378,8 +412,8 @@ class RaftSuite :
                 RaftState.Leader(
                     State(THIS_RAFT_ID, currentTerm = 1, log = ImmutableList.of(LogEntry(1, null))),
                     LeaderState(
-                        nextIndex = mapOf(THIS_RAFT_ID to 1, OTHER_RAFT_ID to 1),
-                        matchIndex = mapOf(THIS_RAFT_ID to 0, OTHER_RAFT_ID to 0)
+                        nextIndex = mapOf(THIS_RAFT_ID to 2, OTHER_RAFT_ID to 2),
+                        matchIndex = mapOf(THIS_RAFT_ID to 1, OTHER_RAFT_ID to 1)
                     )
                 ),
                 RaftEvent.AppendEntriesRPCResponse(
@@ -394,17 +428,19 @@ class RaftSuite :
                 RaftState.Leader(
                     State(THIS_RAFT_ID, currentTerm = 1, log = ImmutableList.of(LogEntry(1, null))),
                     LeaderState(
-                        nextIndex = mapOf(THIS_RAFT_ID to 1, OTHER_RAFT_ID to 0),
-                        matchIndex = mapOf(THIS_RAFT_ID to 0, OTHER_RAFT_ID to 0)
+                        nextIndex = mapOf(THIS_RAFT_ID to 2, OTHER_RAFT_ID to 1),
+                        matchIndex = mapOf(THIS_RAFT_ID to 1, OTHER_RAFT_ID to 1)
                     )
                 ),
                 RaftSideEffect.StartAppendEntriesRPCRequest(
-                    currentState =
-                        State(
-                            THIS_RAFT_ID,
-                            currentTerm = 1,
-                            log = ImmutableList.of(LogEntry(1, null))
-                        ),
+                    mapOf(
+                        OTHER_RAFT_ID to
+                            RaftEvent.AppendEntriesRPC(
+                                leaderTerm = 1,
+                                leaderId = THIS_RAFT_ID,
+                                entries = ImmutableList.of(LogEntry(1, null))
+                            ),
+                    )
                 )
             )
         }
