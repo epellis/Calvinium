@@ -45,3 +45,8 @@ Logging is configured in `src/test/resources/simplelogger.properties`.
 
 This project use [ktfmt](https://github.com/facebookincubator/ktfmt). You can
 run the formatter via: `./gradlew ktfmtFormat`
+
+## Components
+
+- Leadership election and state replication via [Raft](https://raft.github.io/raft.pdf)
+- Membership via [SWIM](https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf) / [Lifeguard](https://arxiv.org/pdf/1707.00788.pdf)

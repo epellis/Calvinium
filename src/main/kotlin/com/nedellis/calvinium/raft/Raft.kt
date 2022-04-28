@@ -9,7 +9,7 @@ import mu.KotlinLogging
 
 data class LogEntry(val term: Int, val command: Any? = null)
 
-data class State(
+internal data class State(
     val id: UUID,
     val currentTerm: Int = 0,
     val votedFor: UUID? = null,
@@ -138,7 +138,7 @@ data class LeaderState(
     }
 }
 
-sealed interface RaftState {
+internal sealed interface RaftState {
     val state: State
 
     // TODO: Investigate getting rid of this
@@ -258,7 +258,7 @@ sealed interface RaftState {
     }
 }
 
-sealed interface RaftEvent {
+internal sealed interface RaftEvent {
     data class FollowerTimeOut(val allServerIds: List<UUID>) : RaftEvent
     data class CandidateElectionTimeOut(val allServerIds: List<UUID>) : RaftEvent
     data class CandidateMajorityVotesReceived(val allServerIds: List<UUID>) : RaftEvent
@@ -284,7 +284,7 @@ sealed interface RaftEvent {
     data class RequestVoteRPCResponse(val r: RaftSideEffect.RequestVoteRPCResponse) : RaftEvent
 }
 
-sealed interface RaftSideEffect {
+internal sealed interface RaftSideEffect {
     data class StartRequestVoteRPCRequest(val requests: Map<UUID, RaftEvent.RequestVoteRPC>) :
         RaftSideEffect
     data class StartAppendEntriesRPCRequest(val requests: Map<UUID, RaftEvent.AppendEntriesRPC>) :
@@ -294,7 +294,7 @@ sealed interface RaftSideEffect {
         RaftSideEffect
 }
 
-fun buildRaftStateMachine(id: UUID): StateMachine<RaftState, RaftEvent, RaftSideEffect> {
+internal fun buildRaftStateMachine(id: UUID): StateMachine<RaftState, RaftEvent, RaftSideEffect> {
     return buildArbitraryRaftStateMachine(RaftState.Follower(State(id)))
 }
 
