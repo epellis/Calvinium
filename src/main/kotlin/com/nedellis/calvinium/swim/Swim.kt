@@ -28,9 +28,11 @@ internal sealed interface SideEffect {
     data class BroadcastFailure(val id: UUID) : SideEffect
 }
 
-internal fun buildSwimPeerStateMachine(id: UUID): StateMachine<PeerState, Event, SideEffect> {
+internal fun buildArbitrarySwimPeerStateMachine(
+    initialState: PeerState
+): StateMachine<PeerState, Event, SideEffect> {
     return StateMachine.create {
-        initialState(PeerState.Alive(id))
+        initialState(initialState)
 
         state<PeerState.Alive> {
             on<Event.PingMember> {
@@ -55,6 +57,8 @@ internal fun buildSwimPeerStateMachine(id: UUID): StateMachine<PeerState, Event,
 
             on<Event.PingReturned> { transitionTo(PeerState.Alive(id)) }
         }
+
+        state<PeerState.Failed> {}
 
         onTransition {
             val validTransition = it as? StateMachine.Transition.Valid ?: return@onTransition
