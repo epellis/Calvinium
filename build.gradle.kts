@@ -31,7 +31,7 @@ tasks.withType<KotlinCompile> {
     }
 }
 
-sourceSets{
+sourceSets {
     main {
         java {
             srcDir("build/generated/source/proto/main/java")
@@ -66,6 +66,11 @@ dependencies {
     implementation("io.grpc:grpc-kotlin-stub:1.2.1")
     implementation("com.google.protobuf:protobuf-kotlin:3.20.1")
     compileOnly("org.apache.tomcat:annotations-api:6.0.53") // necessary for Java 9+
+
+    implementation("com.linecorp.armeria:armeria:1.16.0")
+    implementation("com.linecorp.armeria:armeria-grpc:1.16.0")
+    implementation("com.linecorp.armeria:armeria-kotlin:1.16.0")
+    implementation("com.linecorp.armeria:armeria-protobuf:1.16.0")
 
     testImplementation(kotlin("test"))
     testImplementation("io.kotest:kotest-runner-junit5:5.2.3")
