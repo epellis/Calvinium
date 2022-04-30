@@ -1,57 +1,121 @@
 package com.nedellis.calvinium.gossip
 
-import java.net.URI
+import com.tinder.StateMachine
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import mu.KotlinLogging
 
 internal val T_FAIL = Duration.ofSeconds(60L)
-internal val T_CLEANUP = T_FAIL.multipliedBy(2L)
 
-internal enum class PeerCondition {
-    ALIVE,
-    FAILED
+internal abstract class PeerState {
+    abstract val heartbeat: Int
+    abstract val localLastUpdated: Instant
+
+    data class Alive(override val heartbeat: Int, override val localLastUpdated: Instant) :
+        PeerState()
+    data class Failed(override val heartbeat: Int, override val localLastUpdated: Instant) :
+        PeerState()
+
+    fun updatedAtNow(now: Instant): PeerState {
+        return when (this) {
+            is Alive -> this.copy(localLastUpdated = now)
+            is Failed -> this.copy(localLastUpdated = now)
+            else -> throw IllegalStateException("State must be Alive or Failed")
+        }
+    }
 }
 
-internal data class PeerState(
-    val address: URI,
-    val heartbeat: Int,
-    val lastLive: Instant,
-    val condition: PeerCondition
-)
+internal fun mergePeer(mine: PeerState?, other: PeerState?, now: Instant): PeerState {
+    return if (mine != null && other != null) {
+        if (mine.heartbeat >= other.heartbeat) {
+            mine
+        } else {
+            other.updatedAtNow(now)
+        }
+    } else {
+        listOfNotNull(mine, other).first()
+    }
+}
 
-internal data class State(val peers: Map<UUID, PeerState>) {
+internal interface Event {
+    data class HeartBeat(val now: Instant) : Event
+
+    data class Update(val now: Instant) : Event
+}
+
+internal interface SideEffect {
+    object Drop : SideEffect
+}
+
+internal typealias PeerStateMachine = StateMachine<PeerState, Event, SideEffect>
+
+internal fun buildStateMachine(initialPeerState: PeerState): PeerStateMachine {
+    val logger = KotlinLogging.logger {}
+
+    return StateMachine.create {
+        initialState(initialPeerState)
+        state<PeerState.Alive> {
+            on<Event.HeartBeat> {
+                transitionTo(this.copy(heartbeat = this.heartbeat + 1, localLastUpdated = it.now))
+            }
+
+            on<Event.Update> {
+                val duration = Duration.between(this.localLastUpdated, it.now)
+                assert(!duration.isNegative)
+
+                if (duration >= T_FAIL) {
+                    logger.warn {
+                        "Transitioning $this to Failed state, last updated duration $duration > T_FAIL $T_FAIL"
+                    }
+
+                    transitionTo(PeerState.Failed(this.heartbeat, it.now))
+                } else {
+                    transitionTo(this)
+                }
+            }
+        }
+
+        state<PeerState.Failed> {
+            on<Event.Update> {
+                val duration = Duration.between(this.localLastUpdated, it.now)
+                assert(!duration.isNegative)
+
+                if (duration >= T_FAIL) {
+                    logger.warn {
+                        "Deleting $this, last updated duration $duration > T_FAIL $T_FAIL"
+                    }
+                    transitionTo(this, sideEffect = SideEffect.Drop)
+                } else {
+                    transitionTo(this)
+                }
+            }
+        }
+    }
+}
+
+internal data class FailureDetectorState(val peers: Map<UUID, PeerStateMachine>) {
     private val logger = KotlinLogging.logger {}
 
-    fun updatePeers(now: Instant): State {
-        val newPeers: List<Pair<UUID, PeerState>> =
-            peers
-                .map {
-                    val timeSinceLive = Duration.between(it.value.lastLive, now)
-                    assert(!timeSinceLive.isNegative)
+    fun updatePeers(now: Instant): FailureDetectorState {
+        val newPeers = mutableMapOf<UUID, PeerStateMachine>()
 
-                    if (timeSinceLive < T_FAIL) {
-                        it.key to it.value
-                    } else if (timeSinceLive < T_CLEANUP) {
-                        logger.warn { "Marking $it as FAILED due to $timeSinceLive > $T_FAIL" }
-                        it.key to it.value.copy(condition = PeerCondition.FAILED)
-                    } else {
-                        logger.warn { "Removing $it due to $timeSinceLive > $T_CLEANUP" }
-                        null
-                    }
-                }
-                .filterNotNull()
+        for (peer in peers) {
+            val transition =
+                peer.value.transition(Event.Update(now)) as StateMachine.Transition.Valid<*, *, *>
+            if (transition.sideEffect != SideEffect.Drop) {
+                newPeers[peer.key] = peer.value
+            }
+        }
 
-        return this.copy(peers = newPeers.toMap())
+        return this.copy(peers = newPeers)
     }
 
-    fun mergePeers(othersPeers: Map<UUID, PeerState>): State {
+    fun mergePeers(otherPeers: Map<UUID, PeerState>, now: Instant): FailureDetectorState {
         val newPeers =
-            (peers.asSequence() + othersPeers.asSequence())
-                .groupBy({ it.key }, { it.value })
-                .mapValues { entry -> entry.value.maxByOrNull { it.heartbeat }!! }
-                .toMap()
+            (peers.keys + otherPeers.keys).distinct().associateWith { id ->
+                buildStateMachine(mergePeer(peers[id]?.state, otherPeers[id], now))
+            }
 
         return this.copy(peers = newPeers)
     }

@@ -1,70 +1,82 @@
 package com.nedellis.calvinium.gossip
 
+import com.tinder.StateMachine
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
-import java.net.URI
 import java.time.Instant
-import java.util.UUID
 
-private val OTHER_PEER_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 1))
+// private val OTHER_PEER_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 1))
+// private val ANOTHER_PEER_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 2))
+
+private fun verifyTransition(
+    startingState: PeerState,
+    event: Event,
+    endingState: PeerState,
+    sideEffect: SideEffect? = null
+) {
+    val stateMachine = buildStateMachine(startingState)
+    val transition = stateMachine.transition(event) as StateMachine.Transition.Valid<*, *, *>
+    stateMachine.state shouldBe endingState
+    transition.sideEffect shouldBe sideEffect
+}
 
 class FailureDetectorSuite :
     FunSpec({
-        test("Transitions peer from alive to failed") {
-            val initialState =
-                State(
-                    mapOf(
-                        OTHER_PEER_ID to
-                            PeerState(URI(""), 0, Instant.ofEpochSecond(100), PeerCondition.ALIVE)
-                    )
-                )
-            initialState.updatePeers(Instant.ofEpochSecond(100).plus(T_FAIL)) shouldBe
-                State(
-                    mapOf(
-                        OTHER_PEER_ID to
-                            PeerState(URI(""), 0, Instant.ofEpochSecond(100), PeerCondition.FAILED)
-                    )
-                )
+        test("Heartbeat") {
+            verifyTransition(
+                PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                Event.HeartBeat(Instant.ofEpochSecond(10)),
+                PeerState.Alive(1, Instant.ofEpochSecond(10)),
+            )
         }
 
-        test("Transitions peer from alive to deleted") {
-            val initialState =
-                State(
-                    mapOf(
-                        OTHER_PEER_ID to
-                            PeerState(URI(""), 0, Instant.ofEpochSecond(100), PeerCondition.ALIVE)
-                    )
-                )
-            initialState.updatePeers(Instant.ofEpochSecond(100).plus(T_CLEANUP)) shouldBe
-                State(mapOf())
+        test("Update Alive -> Alive") {
+            verifyTransition(
+                PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                Event.Update(Instant.ofEpochSecond(0).plus(T_FAIL.dividedBy(2L))),
+                PeerState.Alive(0, Instant.ofEpochSecond(0)),
+            )
         }
 
-        test("Transitions peer from failed to deleted") {
-            val initialState =
-                State(
-                    mapOf(
-                        OTHER_PEER_ID to
-                            PeerState(URI(""), 0, Instant.ofEpochSecond(100), PeerCondition.FAILED)
-                    )
-                )
-            initialState.updatePeers(Instant.ofEpochSecond(100).plus(T_CLEANUP)) shouldBe
-                State(mapOf())
+        test("Update Alive -> Failed") {
+            verifyTransition(
+                PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                Event.Update(Instant.ofEpochSecond(0).plus(T_FAIL)),
+                PeerState.Failed(0, Instant.ofEpochSecond(0).plus(T_FAIL)),
+            )
         }
 
-        test("Transitions peer from alive to alive") {
-            val initialState =
-                State(
-                    mapOf(
-                        OTHER_PEER_ID to
-                            PeerState(URI(""), 0, Instant.ofEpochSecond(100), PeerCondition.ALIVE)
-                    )
-                )
-            initialState.updatePeers(Instant.ofEpochSecond(100).plus(T_FAIL.dividedBy(2L))) shouldBe
-                State(
-                    mapOf(
-                        OTHER_PEER_ID to
-                            PeerState(URI(""), 0, Instant.ofEpochSecond(100), PeerCondition.ALIVE)
-                    )
-                )
+        test("Update Alive -> Failed with long time") {
+            verifyTransition(
+                PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                Event.Update(Instant.ofEpochSecond(0).plus(T_FAIL.multipliedBy(100L))),
+                PeerState.Failed(0, Instant.ofEpochSecond(0).plus(T_FAIL.multipliedBy(100L))),
+            )
+        }
+
+        test("Update Failed -> Failed") {
+            verifyTransition(
+                PeerState.Failed(0, Instant.ofEpochSecond(0)),
+                Event.Update(Instant.ofEpochSecond(0).plus(T_FAIL.dividedBy(2L))),
+                PeerState.Failed(0, Instant.ofEpochSecond(0)),
+            )
+        }
+
+        test("Update Failed -> Dropped") {
+            verifyTransition(
+                PeerState.Failed(0, Instant.ofEpochSecond(0)),
+                Event.Update(Instant.ofEpochSecond(0).plus(T_FAIL)),
+                PeerState.Failed(0, Instant.ofEpochSecond(0)),
+                SideEffect.Drop
+            )
+        }
+
+        test("Update Failed -> Dropped with long time") {
+            verifyTransition(
+                PeerState.Failed(0, Instant.ofEpochSecond(0)),
+                Event.Update(Instant.ofEpochSecond(0).plus(T_FAIL.multipliedBy(100L))),
+                PeerState.Failed(0, Instant.ofEpochSecond(0)),
+                SideEffect.Drop
+            )
         }
     })
