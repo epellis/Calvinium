@@ -48,24 +48,19 @@ message SwimGossip {
   map<string, string> new_peers = 3;
 }
 
-message PingRequest {
-  SwimGossip gossip = 1;
+message PeerStateProto {
+  string id = 1;
+  string address = 2;
+  int32 heartbeat = 3;
 }
 
-message PingResponse {
-  SwimGossip gossip = 1;
+message GossipRequest {
+  repeated PeerStateProto peers = 1;
 }
 
-message IndirectPingRequest {
-  SwimGossip gossip = 1;
+message GossipResponse {
 }
 
-message IndirectPingResponse {
-  SwimGossip gossip = 1;
-  bool success = 2;
-}
-
-service Swim {
-  rpc Ping (PingRequest) returns (PingResponse) {}
-  rpc IndirectPing (IndirectPingRequest) returns (IndirectPingResponse) {}
+service GossipFD {
+  rpc Gossip (GossipRequest) returns (GossipResponse) {}
 }

@@ -9,7 +9,7 @@ the [Calvin](http://cs.yale.edu/homes/thomson/publications/calvin-sigmod12.pdf) 
 - [x] Read and Write on single partition, multiple replica
 - [x] Read and Write on multiple partition, single replica
 - [x] Read and Write on multiple partition, multiple replica
-- [ ] Implement raft log or use OSS library
+- [x] Implement raft log or use OSS library
 - [ ] Online partition scaling
 - [ ] Integration test for strong transaction consistency
 - [ ] `CREATE TABLE` and proper support for simple data types
@@ -49,4 +49,4 @@ run the formatter via: `./gradlew ktfmtFormat`
 ## Components
 
 - Leadership election and state replication via [Raft](https://raft.github.io/raft.pdf)
-- Membership via [SWIM](https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf) / [Lifeguard](https://arxiv.org/pdf/1707.00788.pdf)
+- Membership via [Gossip Failure Detector](https://www.cs.cornell.edu/home/rvr/papers/GossipFD.pdf)

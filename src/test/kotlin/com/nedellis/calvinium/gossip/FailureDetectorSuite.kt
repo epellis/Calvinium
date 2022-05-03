@@ -4,9 +4,10 @@ import com.tinder.StateMachine
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import java.time.Instant
+import java.util.UUID
 
-// private val OTHER_PEER_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 1))
-// private val ANOTHER_PEER_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 2))
+private val MY_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 1))
+private val OTHER_ID = UUID.nameUUIDFromBytes(byteArrayOf(0, 2))
 
 private fun verifyTransition(
     startingState: PeerState,
@@ -134,5 +135,77 @@ class FailureDetectorSuite :
                 PeerState.Failed(11, Instant.ofEpochSecond(0)),
                 Instant.ofEpochSecond(10)
             ) shouldBe PeerState.Failed(11, Instant.ofEpochSecond(10))
+        }
+
+        test("updatePeers heartbeats self") {
+            val fd =
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(MY_ID to PeerState.Alive(0, Instant.ofEpochSecond(0)))
+                )
+            val updatedFd = fd.updatePeers(Instant.ofEpochSecond(1))
+            updatedFd shouldBe
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(MY_ID to PeerState.Alive(1, Instant.ofEpochSecond(1)))
+                )
+        }
+
+        test("updatePeers heartbeats self and updates other") {
+            val fd =
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(
+                        MY_ID to PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                        OTHER_ID to PeerState.Alive(0, Instant.ofEpochSecond(0))
+                    )
+                )
+            val updatedFd = fd.updatePeers(Instant.ofEpochSecond(0).plus(T_FAIL.dividedBy(2L)))
+            updatedFd shouldBe
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(
+                        MY_ID to
+                            PeerState.Alive(1, Instant.ofEpochSecond(0).plus(T_FAIL.dividedBy(2L))),
+                        OTHER_ID to PeerState.Alive(0, Instant.ofEpochSecond(0))
+                    )
+                )
+        }
+
+        test("updatePeers heartbeats self and updates other to fail") {
+            val fd =
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(
+                        MY_ID to PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                        OTHER_ID to PeerState.Alive(0, Instant.ofEpochSecond(0))
+                    )
+                )
+            val updatedFd = fd.updatePeers(Instant.ofEpochSecond(0).plus(T_FAIL))
+            updatedFd shouldBe
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(
+                        MY_ID to PeerState.Alive(1, Instant.ofEpochSecond(0).plus(T_FAIL)),
+                        OTHER_ID to PeerState.Failed(0, Instant.ofEpochSecond(0).plus(T_FAIL))
+                    )
+                )
+        }
+
+        test("updatePeers heartbeats self and drops other") {
+            val fd =
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(
+                        MY_ID to PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                        OTHER_ID to PeerState.Failed(0, Instant.ofEpochSecond(0))
+                    )
+                )
+            val updatedFd = fd.updatePeers(Instant.ofEpochSecond(0).plus(T_FAIL))
+            updatedFd shouldBe
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(MY_ID to PeerState.Alive(1, Instant.ofEpochSecond(0).plus(T_FAIL)))
+                )
         }
     })

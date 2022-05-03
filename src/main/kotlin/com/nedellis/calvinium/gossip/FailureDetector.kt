@@ -1,5 +1,9 @@
 package com.nedellis.calvinium.gossip
 
+import com.google.common.util.concurrent.AbstractExecutionThreadService
+import com.linecorp.armeria.server.Server
+import com.linecorp.armeria.server.grpc.GrpcService
+import com.nedellis.calvinium.proto.GossipFDGrpc
 import com.tinder.StateMachine
 import java.time.Duration
 import java.time.Instant
@@ -94,19 +98,32 @@ internal fun buildStateMachine(initialPeerState: PeerState): PeerStateMachine {
     }
 }
 
-internal data class FailureDetectorState(val peers: Map<UUID, PeerStateMachine>) {
+internal data class FailureDetectorState(val id: UUID, val peers: Map<UUID, PeerState>) {
     private val logger = KotlinLogging.logger {}
 
     fun updatePeers(now: Instant): FailureDetectorState {
-        val newPeers = mutableMapOf<UUID, PeerStateMachine>()
+        assert(peers.keys.contains(id))
 
-        for (peer in peers) {
-            val transition =
-                peer.value.transition(Event.Update(now)) as StateMachine.Transition.Valid<*, *, *>
-            if (transition.sideEffect != SideEffect.Drop) {
-                newPeers[peer.key] = peer.value
-            }
-        }
+        val newPeers =
+            peers
+                .mapNotNull { peer ->
+                    val stateMachine = buildStateMachine(peer.value)
+
+                    val transition =
+                        if (peer.key == id) {
+                            stateMachine.transition(Event.HeartBeat(now))
+                        } else {
+                            stateMachine.transition(Event.Update(now))
+                        } as
+                            StateMachine.Transition.Valid<*, *, *>
+
+                    if (transition.sideEffect == SideEffect.Drop) {
+                        null
+                    } else {
+                        peer.key to stateMachine.state
+                    }
+                }
+                .toMap()
 
         return this.copy(peers = newPeers)
     }
@@ -114,11 +131,25 @@ internal data class FailureDetectorState(val peers: Map<UUID, PeerStateMachine>)
     fun mergePeers(otherPeers: Map<UUID, PeerState>, now: Instant): FailureDetectorState {
         val newPeers =
             (peers.keys + otherPeers.keys).distinct().associateWith { id ->
-                buildStateMachine(mergePeer(peers[id]?.state, otherPeers[id], now))
+                mergePeer(peers[id], otherPeers[id], now)
             }
 
         return this.copy(peers = newPeers)
     }
 }
 
-class FailureDetector {}
+internal class GossipFDImpl : GossipFDGrpc.GossipFDImplBase() {}
+
+class FailureDetectorService : AbstractExecutionThreadService() {
+    private val grpcService = GrpcService.builder().addService(GossipFDImpl()).build()
+    private val server = Server.builder().service(grpcService).build()
+    val address = server.activePort()?.localAddress()!!
+
+    override fun run() {
+        server.start()
+
+        while (isRunning) {
+            Thread.sleep(1000)
+        }
+    }
+}
