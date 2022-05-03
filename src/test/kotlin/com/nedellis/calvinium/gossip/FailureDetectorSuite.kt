@@ -79,4 +79,60 @@ class FailureDetectorSuite :
                 SideEffect.Drop
             )
         }
+
+        test("Merge mine and null") {
+            mergePeer(
+                PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                null,
+                Instant.ofEpochSecond(0)
+            ) shouldBe PeerState.Alive(0, Instant.ofEpochSecond(0))
+        }
+
+        test("Merge null and theirs") {
+            mergePeer(
+                null,
+                PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                Instant.ofEpochSecond(0)
+            ) shouldBe PeerState.Alive(0, Instant.ofEpochSecond(0))
+        }
+
+        test("Merge prefers mine with same heartbeat") {
+            mergePeer(
+                PeerState.Alive(10, Instant.ofEpochSecond(2)),
+                PeerState.Alive(10, Instant.ofEpochSecond(1)),
+                Instant.ofEpochSecond(0)
+            ) shouldBe PeerState.Alive(10, Instant.ofEpochSecond(2))
+        }
+
+        test("Merge prefers mine with higher heartbeat") {
+            mergePeer(
+                PeerState.Alive(11, Instant.ofEpochSecond(0)),
+                PeerState.Alive(10, Instant.ofEpochSecond(0)),
+                Instant.ofEpochSecond(0)
+            ) shouldBe PeerState.Alive(11, Instant.ofEpochSecond(0))
+        }
+
+        test("Merge prefers theirs with higher heartbeat") {
+            mergePeer(
+                PeerState.Alive(10, Instant.ofEpochSecond(0)),
+                PeerState.Alive(11, Instant.ofEpochSecond(0)),
+                Instant.ofEpochSecond(10)
+            ) shouldBe PeerState.Alive(11, Instant.ofEpochSecond(10))
+        }
+
+        test("Merge prefers alive over failed with higher heartbeat") {
+            mergePeer(
+                PeerState.Alive(11, Instant.ofEpochSecond(0)),
+                PeerState.Failed(10, Instant.ofEpochSecond(0)),
+                Instant.ofEpochSecond(0)
+            ) shouldBe PeerState.Alive(11, Instant.ofEpochSecond(0))
+        }
+
+        test("Merge prefers failed over alive with higher heartbeat") {
+            mergePeer(
+                PeerState.Alive(10, Instant.ofEpochSecond(0)),
+                PeerState.Failed(11, Instant.ofEpochSecond(0)),
+                Instant.ofEpochSecond(10)
+            ) shouldBe PeerState.Failed(11, Instant.ofEpochSecond(10))
+        }
     })
