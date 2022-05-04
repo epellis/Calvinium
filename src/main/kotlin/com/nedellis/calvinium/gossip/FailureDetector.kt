@@ -31,14 +31,16 @@ internal abstract class PeerState {
 }
 
 internal fun mergePeer(mine: PeerState?, other: PeerState?, now: Instant): PeerState {
-    return if (mine != null && other != null) {
-        if (mine.heartbeat >= other.heartbeat) {
+    val otherAtNow = other?.updatedAtNow(now)
+
+    return if (mine != null && otherAtNow != null) {
+        if (mine.heartbeat >= otherAtNow.heartbeat) {
             mine
         } else {
-            other.updatedAtNow(now)
+            otherAtNow
         }
     } else {
-        listOfNotNull(mine, other).first()
+        listOfNotNull(mine, otherAtNow).first()
     }
 }
 
@@ -129,6 +131,8 @@ internal data class FailureDetectorState(val id: UUID, val peers: Map<UUID, Peer
     }
 
     fun mergePeers(otherPeers: Map<UUID, PeerState>, now: Instant): FailureDetectorState {
+        assert(peers.keys.contains(id))
+
         val newPeers =
             (peers.keys + otherPeers.keys).distinct().associateWith { id ->
                 mergePeer(peers[id], otherPeers[id], now)

@@ -208,4 +208,51 @@ class FailureDetectorSuite :
                     mapOf(MY_ID to PeerState.Alive(1, Instant.ofEpochSecond(0).plus(T_FAIL)))
                 )
         }
+
+        test("mergePeers works with no overlap") {
+            val fd =
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(
+                        MY_ID to PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                    )
+                )
+            val updatedFd =
+                fd.mergePeers(
+                    mapOf(OTHER_ID to PeerState.Alive(0, Instant.ofEpochSecond(0))),
+                    Instant.ofEpochSecond(10)
+                )
+            updatedFd shouldBe
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(
+                        MY_ID to PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                        OTHER_ID to PeerState.Alive(0, Instant.ofEpochSecond(10))
+                    )
+                )
+        }
+
+        test("mergePeers works with overlap") {
+            val fd =
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(
+                        MY_ID to PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                        OTHER_ID to PeerState.Alive(1, Instant.ofEpochSecond(10)),
+                    )
+                )
+            val updatedFd =
+                fd.mergePeers(
+                    mapOf(OTHER_ID to PeerState.Alive(0, Instant.ofEpochSecond(0))),
+                    Instant.ofEpochSecond(20)
+                )
+            updatedFd shouldBe
+                FailureDetectorState(
+                    MY_ID,
+                    mapOf(
+                        MY_ID to PeerState.Alive(0, Instant.ofEpochSecond(0)),
+                        OTHER_ID to PeerState.Alive(1, Instant.ofEpochSecond(10))
+                    )
+                )
+        }
     })
